@@ -1,8 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Print Room Tracker</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
+/* Base reset: GitHub Pages serves this file as-is */
+[hidden]{display:none!important}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img,svg{max-width:100%}
 /* Layout: ink-blue masthead with tabs; one working column below. Forms sit on paper cards; data sits flat on the ground with hairline rules. */
 :root{
   --bg:#eef2f5; --surface:#ffffff; --ink:#132029; --muted:#5a6873; --line:#d6dee5; --chip:#e4ebf1;
@@ -113,7 +125,8 @@ tr.prodhead td{background:var(--chip);font:600 15px var(--display);letter-spacin
 details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
-
+</head>
+<body>
 <header class="mast">
   <div class="wrap">
     <div class="brand">
@@ -903,3 +916,5 @@ setView(view);
 boot();
 })();
 </script>
+</body>
+</html>
