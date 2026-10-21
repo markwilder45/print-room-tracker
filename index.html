@@ -378,7 +378,7 @@ const inRange = (s, [a,b]) => s >= a && s <= b;
 
 // ---------- connection ----------
 // Paste the Apps Script web app URL here after deploying (ends in /exec).
-const API_URL = "";
+const API_URL = "https://script.google.com/macros/s/AKfycbwVt7yQSiENwHg9CTeqUeH4CqLVauW8ED1KFnFvoBMR5KwUfcIdVlVZrphJvbuuihWv/exec";
 let apiUrl = API_URL || store.get("prt.api") || "";
 let passKey = store.get("prt.key") || "";
 let online = false, canWrite = true, serverTime = 0, pollT = null;
