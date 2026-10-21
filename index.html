@@ -65,13 +65,22 @@ h3{font:600 17px/1.2 var(--display);letter-spacing:.05em;text-transform:uppercas
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:grid;gap:14px;min-width:0}
 .section{display:grid;gap:12px;min-width:0}
 .head{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;justify-content:space-between}
-label.f{display:grid;gap:4px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);min-width:0}
+label.f,div.f{display:grid;gap:4px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);min-width:0}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 #entryCard{container:entry/inline-size}
 .pickrow{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:12px}
 .pickrow .wide{grid-column:1/-1}
 @container entry (max-width:400px){.pickrow{grid-template-columns:minmax(0,1fr)}}
 select{text-overflow:ellipsis}
+.optional{text-transform:none;letter-spacing:0;font-weight:400}
+.splits{display:grid;gap:8px;justify-items:start}
+.splitrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;width:100%}
+.splitrow.multi{grid-template-columns:minmax(0,1fr) 96px auto}
+.splitrow input[type=number]{text-align:right}
+.splittotal{font:600 13px var(--mono);color:var(--muted)}
+.timer .splits{grid-column:1/-1;width:100%}
+.timer .splits select,.timer .splits input{padding:6px 8px;font-size:14px}
+input[readonly]{background:var(--chip);color:var(--muted)}
 input,select,textarea{font:400 15px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-width:0;width:100%;box-sizing:border-box}
 input[type=number]{font-family:var(--mono);font-size:14px}
 input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
@@ -211,9 +220,10 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
                 <select id="fStep"></select>
               </label>
             </div>
-            <label class="f" id="fDistWrap" hidden>Distributor
-              <select id="fDist"></select>
-            </label>
+            <div class="f" id="fDistWrap" style="grid-column:1/-1" hidden>
+              <span>Distributors <span class="optional">(optional)</span></span>
+              <div id="fSplits"></div>
+            </div>
             <label class="f" id="fPrinterWrap" hidden>Printer
               <select id="fPrinter"></select>
             </label>
@@ -283,7 +293,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
       </div>
       <div class="grid2">
         <div class="section">
-          <h3>Wrapping paper &amp; ribbons by distributor</h3>
+          <h3>Volume by distributor, this year</h3>
           <div class="tablewrap"><table id="distTable"></table></div>
         </div>
         <div class="section">
@@ -516,6 +526,40 @@ $$("nav.tabs button").forEach(b => b.addEventListener("click", () => setView(b.d
 
 // ---------- floor log ----------
 function opt(v, label, sel){ return `<option value="${esc(v)}"${sel?" selected":""}>${esc(label ?? v)}</option>`; }
+// ---- distributor splits: one entry, several distributors, one shared timer ----
+// Stored in the sheet's distributor cell as "Grove ×20 | Amazon FBA ×15" (one distributor = just its name).
+const SPLIT_SEP = " | ";
+function decodeSplits(e){
+  const d = e && e.distributor; if (!d) return [];
+  const parts = String(d).split(SPLIT_SEP), m = parts.map(p => p.match(/^(.*) ×(\d+(?:\.\d+)?)$/));
+  if (parts.length > 1 && m.every(Boolean)) return m.map(x => ({ name: x[1], qty: Number(x[2]) }));
+  return [{ name: String(d), qty: e.qty ?? null }];
+}
+function encodeSplits(rows){
+  const r = rows.filter(x => x.name);
+  if (!r.length) return null;
+  if (r.length === 1) return r[0].name;
+  return r.map(x => `${x.name} ×${Number(x.qty) || 0}`).join(SPLIT_SEP);
+}
+const splitTotal = rows => rows.reduce((a, r) => a + (Number(r.qty) || 0), 0);
+const splitText = e => { const r = decodeSplits(e); return r.length > 1 ? r.map(x => `${x.name} ${fmtNum(x.qty)}`).join(", ") : (r[0]?.name || ""); };
+function splitEditorHTML(scope, rows){
+  const dists = config?.distributors || [], multi = rows.length > 1;
+  const sel = (i, v) => `<select id="sp-${scope}-${i}-name" data-split="${esc(scope)}" data-i="${i}" data-k="name" aria-label="Distributor ${i+1}">${opt("", "Choose distributor…")}${dists.map(d => opt(d, d, d === v)).join("")}${v && !dists.includes(v) ? opt(v, v, true) : ""}</select>`;
+  return `<div class="splits">${rows.map((r, i) => `<div class="splitrow${multi ? " multi" : ""}">${sel(i, r.name)}${multi ? `<input type="number" min="0" step="1" inputmode="numeric" id="sp-${scope}-${i}-qty" data-split="${esc(scope)}" data-i="${i}" data-k="qty" value="${r.qty ?? ""}" placeholder="Units" aria-label="Units for distributor ${i+1}">` : ""}<button type="button" class="link" data-split="${esc(scope)}" data-i="${i}" data-act="rm" aria-label="Remove distributor ${i+1}" style="color:var(--bad)">Remove</button></div>`).join("")}
+    <div class="row" style="gap:12px"><button type="button" class="link" data-split="${esc(scope)}" data-act="add">+ ${rows.length === 1 ? "Split across another distributor" : "Add distributor"}</button>${multi ? `<span class="splittotal">Total ${fmtNum(splitTotal(rows))} units</span>` : ""}</div></div>`;
+}
+let formSplits = [];
+function defaultSplits(p){ return p?.defaultDistributor ? [{ name: p.defaultDistributor, qty: null }] : []; }
+function renderFormSplits(){
+  $("#fSplits").innerHTML = splitEditorHTML("form", formSplits);
+  const multi = formSplits.length > 1, q = $("#fQty");
+  q.readOnly = multi;
+  if (multi) q.value = splitTotal(formSplits) || "";
+  $("#qtyHint").textContent = multi ? "(total across distributors)" : qtyHintText();
+}
+function qtyHintText(){ const p = prod($("#fProd").value), s = step($("#fProd").value, $("#fStep").value); return p?.overhead ? "(optional)" : s?.kind === "machine" ? "(units printed)" : "(units)"; }
+
 function fillSelects(){
   const emps = config?.employees || [];
   const remembered = store.get("prt.emp");
@@ -524,8 +568,6 @@ function fillSelects(){
   const curP = $("#fProd").value;
   $("#fProd").innerHTML = products().map(p => opt(p.id, p.name, p.id===curP)).join("");
   for (const id of ["#logEmp","#tsEmp"]) { const c=$(id).value; $(id).innerHTML = opt("", "Everyone") + emps.map(n => opt(n,n,n===c)).join(""); }
-  const curD = $("#fDist").value;
-  $("#fDist").innerHTML = opt("", "—") + (config?.distributors||[]).map(d => opt(d,d,d===curD)).join("");
   const curPr = $("#fPrinter").value;
   $("#fPrinter").innerHTML = (config?.printers||[]).map(p => opt(p.name,p.name,p.name===curPr)).join("");
   fillSteps();
@@ -540,12 +582,12 @@ function syncFormFields(){
   const p = prod($("#fProd").value), s = step($("#fProd").value, $("#fStep").value);
   const machine = s?.kind === "machine";
   $("#fPrinterWrap").hidden = !machine;
-  $("#fDistWrap").hidden = !p?.askDistributor;
-  if (p?.askDistributor && !$("#fDist").value && p.defaultDistributor) $("#fDist").value = p.defaultDistributor;
+  $("#fDistWrap").hidden = !p || !!p.overhead;
+  if (!p || p.overhead) formSplits = [];
   $("#fEmpWrap").firstChild.textContent = machine ? "Queued by " : "Employee ";
-  $("#qtyHint").textContent = p?.overhead ? "(optional)" : machine ? "(units printed)" : "(units)";
+  renderFormSplits();
 }
-$("#fProd").addEventListener("change", () => fillSteps(""));
+$("#fProd").addEventListener("change", () => { formSplits = defaultSplits(prod($("#fProd").value)); fillSteps(""); });
 $("#fStep").addEventListener("change", syncFormFields);
 $("#fEmp").addEventListener("change", () => store.set("prt.emp", $("#fEmp").value));
 
@@ -561,8 +603,8 @@ $("#modeManual").addEventListener("click", () => setMode("manual"));
 function readForm(){
   const pid=$("#fProd").value, sid=$("#fStep").value, s=step(pid,sid), p=prod(pid);
   return { employee: $("#fEmp").value, productId: pid, stepId: sid, kind: s?.kind || "labor",
-    qty: $("#fQty").value === "" ? null : Math.max(0, Number($("#fQty").value)),
-    distributor: p?.askDistributor ? ($("#fDist").value || null) : null,
+    qty: formSplits.length > 1 ? splitTotal(formSplits) : ($("#fQty").value === "" ? null : Math.max(0, Number($("#fQty").value))),
+    distributor: p && !p.overhead ? encodeSplits(formSplits) : null,
     printer: s?.kind==="machine" ? ($("#fPrinter").value || null) : null,
     note: $("#fNote").value.trim() || null };
 }
@@ -582,6 +624,7 @@ $("#btnStart").addEventListener("click", async () => {
   if (f.kind !== "machine" && !f.employee) return formMsg("Choose who is doing the work.", true);
   if (!f.productId || !f.stepId) return formMsg("Choose a product and step.", true);
   if (f.kind === "machine" && !f.printer) return formMsg("Add a printer in Setup first.", true);
+  if (formSplits.length > 1 && formSplits.some(r => !r.name)) return formMsg("Choose a distributor on every split line, or remove the empty one.", true);
   const clash = f.kind==="labor" ? openTimers().find(t => t.kind==="labor" && t.employee===f.employee) : null;
   if (clash && !$("#overlapWarn").dataset.ok) {
     const w=$("#overlapWarn");
@@ -596,6 +639,7 @@ $("#btnStart").addEventListener("click", async () => {
   try {
     await writeEntry({ ...f, date: ymd(new Date(now)), start: now, end: null, createdAt: now });
     formMsg(""); $("#fQty").value=""; $("#fNote").value="";
+    formSplits = defaultSplits(prod(f.productId)); renderFormSplits();
     toast("Timer started");
   } catch(err) { formMsg("Couldn't start: " + err.message, true); }
 });
@@ -608,6 +652,7 @@ $("#btnSave").addEventListener("click", async () => {
   if (!date || !st || !en) return formMsg("Enter the date, start and end times.", true);
   let start = timeToMs(date, st), end = timeToMs(date, en);
   if (end <= start) end += 86400000; // ran past midnight
+  if (formSplits.length > 1 && formSplits.some(r => !r.name)) return formMsg("Choose a distributor on every split line, or remove the empty one.", true);
   if (f.qty == null && !prod(f.productId)?.overhead) return formMsg("Enter how many units were done.", true);
   try {
     const old = editing ? entries.get(editing.id) : null;
@@ -615,28 +660,30 @@ $("#btnSave").addEventListener("click", async () => {
     await writeEntry(entry, editing?.id);
     toast(editing ? "Entry updated" : "Entry saved");
     endEdit(); $("#fQty").value=""; $("#fNote").value=""; formMsg("");
+    formSplits = defaultSplits(prod(f.productId)); renderFormSplits();
   } catch(err) { formMsg("Couldn't save: " + err.message, true); }
 });
-function endEdit(){ editing=null; $("#btnCancelEdit").hidden=true; setMode("live"); }
+function endEdit(){ editing=null; $("#btnCancelEdit").hidden=true; setMode("live"); formSplits = defaultSplits(prod($("#fProd").value)); $("#fQty").readOnly=false; renderFormSplits(); }
 $("#btnCancelEdit").addEventListener("click", endEdit);
 
 function beginEdit(e){
   editing = {id:e.id};
   $("#fProd").value = e.productId; fillSteps(e.stepId);
   $("#fEmp").value = e.employee || ""; $("#fQty").value = e.qty ?? ""; $("#fNote").value = e.note || "";
-  if (e.distributor) $("#fDist").value = e.distributor; if (e.printer) $("#fPrinter").value = e.printer;
+  formSplits = decodeSplits(e).map(r => ({...r})); renderFormSplits();
+  if (e.printer) $("#fPrinter").value = e.printer;
   $("#fDate").value = e.date; const s=new Date(e.start), en=new Date(e.end);
   $("#fStart").value = `${pad(s.getHours())}:${pad(s.getMinutes())}`; $("#fEnd").value = `${pad(en.getHours())}:${pad(en.getMinutes())}`;
   setMode("manual"); $("#btnCancelEdit").hidden=false; $("#formTitle").textContent="Edit entry";
   $("#entryCard").scrollIntoView({behavior:"smooth", block:"start"});
 }
 
-function renderTimers(){
-  const typed = {}; $$("#timers input[id^='q-']").forEach(i => typed[i.id] = i.value);
+function renderTimers(fresh){
+  const typed = {}; if (!fresh) $$("#timers input[id], #timers select[id]").forEach(i => typed[i.id] = i.value);
   const focusId = document.activeElement?.id;
   paintTimers();
-  for (const [id,v] of Object.entries(typed)) { const el=document.getElementById(id); if (el) el.value = v; }
-  if (focusId && focusId.startsWith("q-")) document.getElementById(focusId)?.focus();
+  for (const [id,v] of Object.entries(typed)) { const el=document.getElementById(id); if (el && document.activeElement !== el) el.value = v; }
+  if (focusId && (focusId.startsWith("q-") || focusId.startsWith("sp-"))) document.getElementById(focusId)?.focus();
 }
 function paintTimers(){
   const list = openTimers();
@@ -646,9 +693,10 @@ function paintTimers(){
     const p=prod(t.productId), s=step(t.productId,t.stepId), machine=t.kind==="machine";
     return `<div class="timer" data-timer="${esc(t.id)}" style="border-left-color:${colorVar(p)}">
       <div><div class="who">${machine ? esc(t.printer||"Printer") + ` <span class="pill machine">print run</span>` : esc(t.employee)}</div>
-      <div class="what">${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)}${t.distributor?` · ${esc(t.distributor)}`:""} · since ${fmtTime(t.start)}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}</div></div>
+      <div class="what">${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)} · since ${fmtTime(t.start)}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}</div></div>
       <div class="el" data-start="${t.start}">${fmtElapsed(Date.now()-t.start)}</div>
-      <div class="act"><input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">
+      ${p && !p.overhead ? splitEditorHTML(t.id, timerRows(t)) : ""}
+      <div class="act">${timerRows(t).length > 1 ? `<span class="splittotal">${fmtNum(splitTotal(timerRows(t)))} units total</span>` : `<input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">`}
         <button class="b primary small" type="button" data-stop="${esc(t.id)}">Stop &amp; save</button>
         <button class="link" type="button" data-discard="${esc(t.id)}">Discard</button></div></div>`;
   }).join("");
@@ -663,11 +711,68 @@ $("#timers").addEventListener("click", async ev => {
     else { ev.target.dataset.armed="1"; ev.target.textContent="Tap again to discard"; setTimeout(()=>{ if(ev.target.isConnected){ delete ev.target.dataset.armed; ev.target.textContent="Discard"; } }, 4000); }
     return;
   }
-  const q = $(`#q-${CSS.escape(t.id)}`).value;
-  if (q === "" && !prod(t.productId)?.overhead) { $(`#q-${CSS.escape(t.id)}`).focus(); toast("Enter the units finished first"); return; }
+  const rows = timerRows(t), multi = rows.length > 1;
+  if (multi && rows.some(r => !r.name)) { toast("Choose a distributor on every split line first"); return; }
+  const q = multi ? String(splitTotal(rows)) : $(`#q-${CSS.escape(t.id)}`).value;
+  if ((q === "" || (multi && !splitTotal(rows))) && !prod(t.productId)?.overhead) { (multi ? $(`#sp-${CSS.escape(t.id)}-0-qty`) : $(`#q-${CSS.escape(t.id)}`))?.focus(); toast(multi ? "Enter units for each distributor first" : "Enter the units finished first"); return; }
   ev.target.disabled = true;
   try { applyEntry((await api({ action:"stop", id:t.id, end: Date.now(), qty: q }, "POST")).entry); renderAll(); toast("Saved"); }
   catch(err){ ev.target.disabled=false; toast("Couldn't stop: " + err.message); }
+});
+
+// Split editor events: the form keeps its rows locally; a running timer saves its rows to the sheet.
+const timerSaves = new Map();   // timer id -> promise chain, so edits to one timer save in order
+function saveTimerSplits(t, rows){
+  const qtyInput = $(`#q-${CSS.escape(t.id)}`);
+  const single = qtyInput && qtyInput.value !== "" ? Number(qtyInput.value) : t.qty;
+  const next = { ...t, distributor: encodeSplits(rows), qty: rows.filter(r=>r.name).length > 1 ? splitTotal(rows) : (single ?? null) };
+  // keep empty lines on screen while they're being filled in
+  next._draftRows = rows;
+  entries.set(t.id, next); renderTimers(true);
+  const body = { ...next }; delete body._draftRows;
+  const chain = (timerSaves.get(t.id) || Promise.resolve()).then(() => api({ action:"upsert", entry: body }, "POST"))
+    .then(d => { const cur = entries.get(t.id); if (cur && !cur.end) entries.set(t.id, { ...d.entry, _draftRows: cur._draftRows }); })
+    .catch(err => toast("Couldn't save the distributors: " + err.message));
+  timerSaves.set(t.id, chain);
+}
+function timerRows(t){ return t._draftRows || decodeSplits(t); }
+function rowsFor(scope){
+  if (scope === "form") return formSplits;
+  const t = entries.get(scope); if (!t) return null;
+  return (t._draftRows || decodeSplits(t)).map(r => ({...r}));
+}
+function commitRows(scope, rows){
+  if (scope === "form") { formSplits = rows; renderFormSplits(); return; }
+  const t = entries.get(scope); if (!t || t.end) return;
+  if (!guardWrite()) return;
+  saveTimerSplits(t, rows);
+}
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("[data-split][data-act]"); if (!b) return;
+  const scope = b.dataset.split, rows = rowsFor(scope); if (!rows) return;
+  if (b.dataset.act === "add") {
+    if (rows.length === 1 && rows[0].qty == null) {
+      const v = scope === "form" ? $("#fQty").value : $(`#q-${CSS.escape(scope)}`)?.value;
+      rows[0].qty = v === "" || v == null ? null : Number(v);
+    }
+    rows.push({ name: "", qty: null });
+  } else { rows.splice(+b.dataset.i, 1); if (rows.length === 1 && scope === "form" && rows[0].qty != null) $("#fQty").value = rows[0].qty; }
+  if (scope === "form") { commitRows(scope, rows); }
+  else commitRows(scope, rows);
+  const focusIdx = b.dataset.act === "add" ? rows.length - 1 : Math.max(0, +b.dataset.i - 1);
+  document.getElementById(`sp-${scope}-${focusIdx}-name`)?.focus();
+});
+document.addEventListener("input", ev => {
+  const el = ev.target; if (!el.dataset?.split || el.dataset.split !== "form") return;
+  const rows = formSplits, r = rows[+el.dataset.i]; if (!r) return;
+  r[el.dataset.k] = el.dataset.k === "qty" ? (el.value === "" ? null : Number(el.value)) : el.value;
+  if (rows.length > 1) { $("#fQty").value = splitTotal(rows) || ""; const tot = el.closest(".splits")?.querySelector(".splittotal"); if (tot) tot.textContent = `Total ${fmtNum(splitTotal(rows))} units`; }
+});
+document.addEventListener("change", ev => {
+  const el = ev.target; if (!el.dataset?.split || el.dataset.split === "form") return;
+  const scope = el.dataset.split, rows = rowsFor(scope); if (!rows || !rows[+el.dataset.i]) return;
+  rows[+el.dataset.i][el.dataset.k] = el.dataset.k === "qty" ? (el.value === "" ? null : Number(el.value)) : el.value;
+  commitRows(scope, rows);
 });
 
 function renderLog(){
@@ -680,7 +785,7 @@ function renderLog(){
       <td>${e.kind==="machine" ? `<span class="pill machine">${esc(e.printer||"printer")}</span>` : esc(e.employee)}</td>
       <td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p?.name||e.productId)}</td>
       <td>${esc(s?.name||e.stepId)}</td><td class="n">${fmtNum(e.qty)}</td><td class="n">${fmtNum(h*60)}</td><td class="n">${rate?fmtNum(rate,1):"—"}</td>
-      <td class="note">${esc([e.distributor, e.note].filter(Boolean).join(" · "))}</td>
+      <td class="note">${esc([splitText(e), e.note].filter(Boolean).join(" · "))}</td>
       <td style="white-space:nowrap"><button class="link" data-edit="${esc(e.id)}">Edit</button><button class="link" data-del="${esc(e.id)}" style="color:var(--bad)">Delete</button></td></tr>`; }).join("") + `</tbody>`;
   const lab = rows.filter(e=>e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0), mac = rows.filter(e=>e.kind==="machine").reduce((a,e)=>a+hoursOf(e),0);
   $("#logSummary").textContent = `${rows.length} entries · ${fmtH(lab)} labor hours · ${fmtH(mac)} printer hours`;
@@ -741,12 +846,14 @@ function renderDashboard(){
   $("#volTable").innerHTML = `<thead><tr><th>${dashMetric==="units"?"Units completed":dashMetric==="labor"?"Labor hours":"Printer hours"}</th>${cols.map(([k,n]) => `<th class="n">${n}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${label(k)}</span></th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
   renderChart(anchor, all);
   // distributors (year to date)
-  const distP = products().filter(p => p.askDistributor);
   const yr = byP.year, mo = byP.month;
-  const dists = [...new Set(yr.filter(e => distP.some(p=>p.id===e.productId) && e.distributor).map(e=>e.distributor))].sort();
-  if (!dists.length) $("#distTable").innerHTML = `<tbody><tr><td><div class="empty">No wrapping paper or ribbon shipments with a distributor logged this year.</div></td></tr></tbody>`;
+  const volBy = (list) => { const m = {}; for (const e of list) { const p = prod(e.productId); if (!p || e.stepId !== p.completeStep) continue; for (const r of decodeSplits(e)) { if (!r.name) continue; ((m[r.name] ||= {})[p.id] ||= 0); m[r.name][p.id] += Number(r.qty) || 0; } } return m; };
+  const yv = volBy(yr), mv = volBy(mo);
+  const dists = Object.keys(yv).sort();
+  const distP = products().filter(p => dists.some(d => yv[d][p.id]));
+  if (!dists.length) $("#distTable").innerHTML = `<tbody><tr><td><div class="empty">No finished units with a distributor logged this year. Add distributors on the Ship (or Package) step to see them here.</div></td></tr></tbody>`;
   else $("#distTable").innerHTML = `<thead><tr><th>Distributor</th>${distP.map(p=>`<th class="n">${esc(p.name.replace("Wrapping Paper – ","Wrap "))}</th>`).join("")}<th class="n">This month</th></tr></thead><tbody>` +
-    dists.map(d => `<tr><td>${esc(d)}</td>${distP.map(p => `<td class="n">${fmtNum(yr.filter(e=>e.distributor===d && e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0))}</td>`).join("")}<td class="n">${fmtNum(mo.filter(e=>e.distributor===d && distP.some(p=>p.id===e.productId && e.stepId===p.completeStep)).reduce((a,e)=>a+(e.qty||0),0))}</td></tr>`).join("") + `</tbody>`;
+    dists.map(d => `<tr><td>${esc(d)}</td>${distP.map(p => `<td class="n">${fmtNum(yv[d][p.id] || 0)}</td>`).join("")}<td class="n">${fmtNum(Object.values(mv[d] || {}).reduce((a,b)=>a+b,0))}</td></tr>`).join("") + `</tbody>`;
   // employees this week
   const emps = [...new Set(wk.filter(e=>e.kind==="labor").map(e=>e.employee))].sort();
   if (!emps.length) $("#empTable").innerHTML = `<tbody><tr><td><div class="empty">No hands-on time logged this week.</div></td></tr></tbody>`;
@@ -888,7 +995,7 @@ function renderSetup(){
       <td><input type="radio" name="cs-${pi}" id="s-${pi}-${si}-c" data-p="${pi}" data-s="${si}" data-k="complete" ${p.completeStep===s.id?"checked":""} style="width:auto" aria-label="Count volume at ${esc(s.name)}"></td>`}
       <td style="white-space:nowrap"><button class="mv" type="button" data-move="${pi}|${si}|-1" aria-label="Move ${esc(s.name)} up" ${si===0?"disabled":""}>↑</button> <button class="mv" type="button" data-move="${pi}|${si}|1" aria-label="Move ${esc(s.name)} down" ${si===p.steps.length-1?"disabled":""}>↓</button> <button class="link" type="button" data-rm-step="${pi}|${si}" style="color:var(--bad)">Remove</button></td></tr>`).join("")}
     </tbody></table></div><div class="row" style="margin-top:8px"><button class="b small" type="button" data-add-step="${pi}">Add step</button>
-    ${p.overhead?"":`<label class="f" style="flex-direction:row;display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="ad-${pi}" data-ask="${pi}" ${p.askDistributor?"checked":""} style="width:auto"> Ask for distributor</label>`}</div></details>`).join("");
+    </div></details>`).join("");
 }
 // ---- step order: open-state memory, buttons, and pointer drag (mouse + touch) ----
 const openProducts = new Set();
@@ -962,7 +1069,7 @@ $("#view-setup").addEventListener("click", ev => {
   else return;
   markDirty(); renderSetup();
 });
-function addFromInput(inputId, listKey){ const v=$(inputId).value.trim(); if (!v || !draft) return; if (!draft[listKey].includes(v)) draft[listKey].push(v); $(inputId).value=""; markDirty(); renderSetup(); }
+function addFromInput(inputId, listKey){ const v=$(inputId).value.replace(/[|×]/g," ").replace(/\s+/g," ").trim(); if (!v || !draft) return; if (!draft[listKey].includes(v)) draft[listKey].push(v); $(inputId).value=""; markDirty(); renderSetup(); }
 $("#addEmp").addEventListener("click", () => addFromInput("#newEmp","employees"));
 $("#addDist").addEventListener("click", () => addFromInput("#newDist","distributors"));
 $("#newEmp").addEventListener("keydown", e => { if (e.key==="Enter") { e.preventDefault(); addFromInput("#newEmp","employees"); } });
