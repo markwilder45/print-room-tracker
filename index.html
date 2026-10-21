@@ -293,7 +293,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
       </div>
       <div class="grid2">
         <div class="section">
-          <h3>Volume by distributor, this year</h3>
+          <h3>Units started by distributor, this year</h3>
           <div class="tablewrap"><table id="distTable"></table></div>
         </div>
         <div class="section">
@@ -383,7 +383,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
         </div>
       </div>
       <div class="section">
-        <div class="head"><h3>Products and steps</h3><span class="note">Drag the dotted handle (or use ↑ ↓) to set the order steps appear in the floor log. Target = units per hour (your sheet's Hourly Target). Share = fraction of units that go through the step. Overhead steps use hours per day.</span></div>
+        <div class="head"><h3>Products and steps</h3><span class="note">Drag the dotted handle (or use ↑ ↓) to set the order steps appear in the floor log. Distributors are logged on the top step only. Target = units per hour (your sheet's Hourly Target). Share = fraction of units that go through the step. Overhead steps use hours per day.</span></div>
         <div id="prodEditor" class="section"></div>
       </div>
     </section>
@@ -550,8 +550,19 @@ function splitEditorHTML(scope, rows){
     <div class="row" style="gap:12px"><button type="button" class="link" data-split="${esc(scope)}" data-act="add">+ ${rows.length === 1 ? "Split across another distributor" : "Add distributor"}</button>${multi ? `<span class="splittotal">Total ${fmtNum(splitTotal(rows))} units</span>` : ""}</div></div>`;
 }
 let formSplits = [];
+// Distributors are captured once, on each product's first step (top of its order in Setup).
+const firstStepId = pid => prod(pid)?.steps?.[0]?.id || null;
+const isFirstStep = (pid, sid) => !!sid && firstStepId(pid) === sid;
+const distRequired = p => !!p && !p.overhead && p.distributorRequired !== false;
+const namedSplits = rows => rows.filter(r => r.name);
 function defaultSplits(p){ return p?.defaultDistributor ? [{ name: p.defaultDistributor, qty: null }] : []; }
 function renderFormSplits(){
+  const pid = $("#fProd").value, p = prod(pid);
+  if (p && !p.overhead && !isFirstStep(pid, $("#fStep").value)) {
+    formSplits = [];
+    $("#fSplits").innerHTML = `<p class="note" style="margin:0">Distributors are logged once, at <b>${esc(p.steps[0]?.name || "the first step")}</b>. Here, just enter the total units.</p>`;
+    $("#fQty").readOnly = false; $("#qtyHint").textContent = qtyHintText(); return;
+  }
   $("#fSplits").innerHTML = splitEditorHTML("form", formSplits);
   const multi = formSplits.length > 1, q = $("#fQty");
   q.readOnly = multi;
@@ -583,12 +594,13 @@ function syncFormFields(){
   const machine = s?.kind === "machine";
   $("#fPrinterWrap").hidden = !machine;
   $("#fDistWrap").hidden = !p || !!p.overhead;
+  const lbl = $("#fDistWrap > span"); if (lbl) lbl.innerHTML = `Distributors <span class="optional">${isFirstStep(p?.id, s?.id) ? (distRequired(p) ? "(required on this step)" : "(optional)") : ""}</span>`;
   if (!p || p.overhead) formSplits = [];
   $("#fEmpWrap").firstChild.textContent = machine ? "Queued by " : "Employee ";
   renderFormSplits();
 }
 $("#fProd").addEventListener("change", () => { formSplits = defaultSplits(prod($("#fProd").value)); fillSteps(""); });
-$("#fStep").addEventListener("change", syncFormFields);
+$("#fStep").addEventListener("change", () => { const pid = $("#fProd").value; formSplits = isFirstStep(pid, $("#fStep").value) ? defaultSplits(prod(pid)) : []; syncFormFields(); });
 $("#fEmp").addEventListener("change", () => store.set("prt.emp", $("#fEmp").value));
 
 function setMode(m){ mode=m;
@@ -604,7 +616,7 @@ function readForm(){
   const pid=$("#fProd").value, sid=$("#fStep").value, s=step(pid,sid), p=prod(pid);
   return { employee: $("#fEmp").value, productId: pid, stepId: sid, kind: s?.kind || "labor",
     qty: formSplits.length > 1 ? splitTotal(formSplits) : ($("#fQty").value === "" ? null : Math.max(0, Number($("#fQty").value))),
-    distributor: p && !p.overhead ? encodeSplits(formSplits) : null,
+    distributor: p && !p.overhead && isFirstStep(pid, sid) ? encodeSplits(formSplits) : null,
     printer: s?.kind==="machine" ? ($("#fPrinter").value || null) : null,
     note: $("#fNote").value.trim() || null };
 }
@@ -653,6 +665,7 @@ $("#btnSave").addEventListener("click", async () => {
   let start = timeToMs(date, st), end = timeToMs(date, en);
   if (end <= start) end += 86400000; // ran past midnight
   if (formSplits.length > 1 && formSplits.some(r => !r.name)) return formMsg("Choose a distributor on every split line, or remove the empty one.", true);
+  if (isFirstStep(f.productId, f.stepId) && distRequired(prod(f.productId)) && !namedSplits(formSplits).length) return formMsg(`Add at least one distributor. ${prod(f.productId)?.steps[0]?.name || "The first step"} is where distributors are logged.`, true);
   if (f.qty == null && !prod(f.productId)?.overhead) return formMsg("Enter how many units were done.", true);
   try {
     const old = editing ? entries.get(editing.id) : null;
@@ -695,7 +708,7 @@ function paintTimers(){
       <div><div class="who">${machine ? esc(t.printer||"Printer") + ` <span class="pill machine">print run</span>` : esc(t.employee)}</div>
       <div class="what">${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)} · since ${fmtTime(t.start)}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}</div></div>
       <div class="el" data-start="${t.start}">${fmtElapsed(Date.now()-t.start)}</div>
-      ${p && !p.overhead ? splitEditorHTML(t.id, timerRows(t)) : ""}
+      ${p && !p.overhead && isFirstStep(t.productId, t.stepId) ? splitEditorHTML(t.id, timerRows(t)) : ""}
       <div class="act">${timerRows(t).length > 1 ? `<span class="splittotal">${fmtNum(splitTotal(timerRows(t)))} units total</span>` : `<input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">`}
         <button class="b primary small" type="button" data-stop="${esc(t.id)}">Stop &amp; save</button>
         <button class="link" type="button" data-discard="${esc(t.id)}">Discard</button></div></div>`;
@@ -711,8 +724,14 @@ $("#timers").addEventListener("click", async ev => {
     else { ev.target.dataset.armed="1"; ev.target.textContent="Tap again to discard"; setTimeout(()=>{ if(ev.target.isConnected){ delete ev.target.dataset.armed; ev.target.textContent="Discard"; } }, 4000); }
     return;
   }
-  const rows = timerRows(t), multi = rows.length > 1;
+  const first = isFirstStep(t.productId, t.stepId);
+  const rows = first ? timerRows(t) : [], multi = rows.length > 1;
   if (multi && rows.some(r => !r.name)) { toast("Choose a distributor on every split line first"); return; }
+  if (first && distRequired(prod(t.productId)) && !namedSplits(rows).length) {
+    if (!rows.length) commitRows(t.id, [{ name:"", qty:null }]);
+    setTimeout(() => document.getElementById(`sp-${t.id}-0-name`)?.focus(), 50);
+    toast("Add at least one distributor before saving this step"); return;
+  }
   const q = multi ? String(splitTotal(rows)) : $(`#q-${CSS.escape(t.id)}`).value;
   if ((q === "" || (multi && !splitTotal(rows))) && !prod(t.productId)?.overhead) { (multi ? $(`#sp-${CSS.escape(t.id)}-0-qty`) : $(`#q-${CSS.escape(t.id)}`))?.focus(); toast(multi ? "Enter units for each distributor first" : "Enter the units finished first"); return; }
   ev.target.disabled = true;
@@ -847,11 +866,11 @@ function renderDashboard(){
   renderChart(anchor, all);
   // distributors (year to date)
   const yr = byP.year, mo = byP.month;
-  const volBy = (list) => { const m = {}; for (const e of list) { const p = prod(e.productId); if (!p || e.stepId !== p.completeStep) continue; for (const r of decodeSplits(e)) { if (!r.name) continue; ((m[r.name] ||= {})[p.id] ||= 0); m[r.name][p.id] += Number(r.qty) || 0; } } return m; };
+  const volBy = (list) => { const m = {}; for (const e of list) { const p = prod(e.productId); if (!p || p.overhead || e.stepId !== p.steps[0]?.id) continue; for (const r of decodeSplits(e)) { if (!r.name) continue; ((m[r.name] ||= {})[p.id] ||= 0); m[r.name][p.id] += Number(r.qty) || 0; } } return m; };
   const yv = volBy(yr), mv = volBy(mo);
   const dists = Object.keys(yv).sort();
   const distP = products().filter(p => dists.some(d => yv[d][p.id]));
-  if (!dists.length) $("#distTable").innerHTML = `<tbody><tr><td><div class="empty">No finished units with a distributor logged this year. Add distributors on the Ship (or Package) step to see them here.</div></td></tr></tbody>`;
+  if (!dists.length) $("#distTable").innerHTML = `<tbody><tr><td><div class="empty">No distributors logged yet this year. They come from each product's first step.</div></td></tr></tbody>`;
   else $("#distTable").innerHTML = `<thead><tr><th>Distributor</th>${distP.map(p=>`<th class="n">${esc(p.name.replace("Wrapping Paper – ","Wrap "))}</th>`).join("")}<th class="n">This month</th></tr></thead><tbody>` +
     dists.map(d => `<tr><td>${esc(d)}</td>${distP.map(p => `<td class="n">${fmtNum(yv[d][p.id] || 0)}</td>`).join("")}<td class="n">${fmtNum(Object.values(mv[d] || {}).reduce((a,b)=>a+b,0))}</td></tr>`).join("") + `</tbody>`;
   // employees this week
@@ -995,6 +1014,7 @@ function renderSetup(){
       <td><input type="radio" name="cs-${pi}" id="s-${pi}-${si}-c" data-p="${pi}" data-s="${si}" data-k="complete" ${p.completeStep===s.id?"checked":""} style="width:auto" aria-label="Count volume at ${esc(s.name)}"></td>`}
       <td style="white-space:nowrap"><button class="mv" type="button" data-move="${pi}|${si}|-1" aria-label="Move ${esc(s.name)} up" ${si===0?"disabled":""}>↑</button> <button class="mv" type="button" data-move="${pi}|${si}|1" aria-label="Move ${esc(s.name)} down" ${si===p.steps.length-1?"disabled":""}>↓</button> <button class="link" type="button" data-rm-step="${pi}|${si}" style="color:var(--bad)">Remove</button></td></tr>`).join("")}
     </tbody></table></div><div class="row" style="margin-top:8px"><button class="b small" type="button" data-add-step="${pi}">Add step</button>
+    ${p.overhead?"":`<label class="optional" style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="rq-${pi}" data-req="${pi}" ${p.distributorRequired!==false?"checked":""} style="width:auto"> Require a distributor on the first step (${esc(p.steps[0]?.name||"none yet")})</label>`}
     </div></details>`).join("");
 }
 // ---- step order: open-state memory, buttons, and pointer drag (mouse + touch) ----
@@ -1053,7 +1073,7 @@ $("#view-setup").addEventListener("input", ev => {
   if (t.dataset.pr != null) { const p = draft.printers[+t.dataset.pr]; p[t.dataset.k] = t.dataset.k==="name" ? t.value : Number(t.value); markDirty(); }
   else if (t.dataset.s != null) { const p=draft.products[+t.dataset.p], s=p.steps[+t.dataset.s], k=t.dataset.k;
     if (k==="complete") p.completeStep = s.id; else if (k==="name"||k==="kind") s[k]=t.value; else s[k] = t.value===""?null:Number(t.value); markDirty(); }
-  else if (t.dataset.ask != null) { draft.products[+t.dataset.ask].askDistributor = t.checked; markDirty(); }
+  else if (t.dataset.req != null) { draft.products[+t.dataset.req].distributorRequired = t.checked; markDirty(); }
   else if (t.id==="setHrs") { draft.productiveHoursPerPerson = Number(t.value)||6.5; markDirty(); }
   else if (t.id==="setDays") { draft.workdaysPerWeek = Number(t.value)||5; markDirty(); }
 });
