@@ -67,6 +67,11 @@ h3{font:600 17px/1.2 var(--display);letter-spacing:.05em;text-transform:uppercas
 .head{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;justify-content:space-between}
 label.f{display:grid;gap:4px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);min-width:0}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+#entryCard{container:entry/inline-size}
+.pickrow{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:12px}
+.pickrow .wide{grid-column:1/-1}
+@container entry (max-width:400px){.pickrow{grid-template-columns:minmax(0,1fr)}}
+select{text-overflow:ellipsis}
 input,select,textarea{font:400 15px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-width:0;width:100%;box-sizing:border-box}
 input[type=number]{font-family:var(--mono);font-size:14px}
 input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
@@ -181,15 +186,17 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
             </div>
           </div>
           <form id="entryForm" class="fields" autocomplete="off">
-            <label class="f" id="fEmpWrap">Employee
-              <select id="fEmp"></select>
-            </label>
-            <label class="f">Product
-              <select id="fProd"></select>
-            </label>
-            <label class="f">Step
-              <select id="fStep"></select>
-            </label>
+            <div class="pickrow">
+              <label class="f" id="fEmpWrap">Employee
+                <select id="fEmp"></select>
+              </label>
+              <label class="f">Product
+                <select id="fProd"></select>
+              </label>
+              <label class="f wide">Step
+                <select id="fStep"></select>
+              </label>
+            </div>
             <label class="f" id="fDistWrap" hidden>Distributor
               <select id="fDist"></select>
             </label>
