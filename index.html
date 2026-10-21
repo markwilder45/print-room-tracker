@@ -1,0 +1,905 @@
+<title>Print Room Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: ink-blue masthead with tabs; one working column below. Forms sit on paper cards; data sits flat on the ground with hairline rules. */
+:root{
+  --bg:#eef2f5; --surface:#ffffff; --ink:#132029; --muted:#5a6873; --line:#d6dee5; --chip:#e4ebf1;
+  --accent:#0b6f93; --accent-ink:#ffffff; --mast:#132a38; --mast-ink:#e9f1f6; --mast-muted:#9fb6c4;
+  --good:#23794a; --warn:#a86300; --bad:#b0281f; --good-bg:#e1f2e8; --warn-bg:#fbefd9; --bad-bg:#f9e2df;
+  --p0:#0b7fab; --p1:#c0397a; --p2:#c88a12; --p3:#3d8f5a; --p4:#2a5d3d; --p5:#7a56b8; --p6:#d0603a; --p7:#7d8b96;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --r:6px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e161c; --surface:#16212a; --ink:#e3eaef; --muted:#91a1ad; --line:#283641; --chip:#1f2c36;
+  --accent:#45b5dc; --accent-ink:#06202b; --mast:#0a1218; --mast-ink:#e3eef4; --mast-muted:#7f98a7;
+  --good:#5cc489; --warn:#e3a54a; --bad:#ef7a70; --good-bg:#16301f; --warn-bg:#33270f; --bad-bg:#3a1a17;
+  --p0:#3fb0dc; --p1:#e2669f; --p2:#e2ad3e; --p3:#62b77f; --p4:#3f8a5b; --p5:#a586de; --p6:#ec8a64; --p7:#9aa8b3;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e161c; --surface:#16212a; --ink:#e3eaef; --muted:#91a1ad; --line:#283641; --chip:#1f2c36;
+  --accent:#45b5dc; --accent-ink:#06202b; --mast:#0a1218; --mast-ink:#e3eef4; --mast-muted:#7f98a7;
+  --good:#5cc489; --warn:#e3a54a; --bad:#ef7a70; --good-bg:#16301f; --warn-bg:#33270f; --bad-bg:#3a1a17;
+  --p0:#3fb0dc; --p1:#e2669f; --p2:#e2ad3e; --p3:#62b77f; --p4:#3f8a5b; --p5:#a586de; --p6:#ec8a64; --p7:#9aa8b3;
+  color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--mast)}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.mast{background:var(--mast);color:var(--mast-ink);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.mast .wrap{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px;padding-block:10px 0}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.02em;text-transform:uppercase}
+.reg{width:22px;height:22px;flex:none}
+.today{font-family:var(--mono);font-size:12px;color:var(--mast-muted);margin-left:auto}
+nav.tabs{display:flex;gap:2px;width:100%;overflow-x:auto;scrollbar-width:none}
+nav.tabs button{font:600 15px var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--mast-muted);background:none;border:0;padding:10px 14px 11px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--mast-ink);border-bottom-color:var(--accent)}
+nav.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+main .wrap{padding-block:20px 48px;display:grid;gap:22px}
+h2{font:700 24px/1.1 var(--display);letter-spacing:.01em;margin:0;text-wrap:balance}
+h3{font:600 17px/1.2 var(--display);letter-spacing:.05em;text-transform:uppercase;margin:0;color:var(--muted)}
+.sub{color:var(--muted);margin:4px 0 0;max-width:68ch}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.grid2{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:grid;gap:14px;min-width:0}
+.section{display:grid;gap:12px;min-width:0}
+.head{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;justify-content:space-between}
+label.f{display:grid;gap:4px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);min-width:0}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+input,select,textarea{font:400 15px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-width:0;width:100%;box-sizing:border-box}
+input[type=number]{font-family:var(--mono);font-size:14px}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+button.b{font:600 14px var(--body);border-radius:4px;padding:9px 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;white-space:nowrap}
+button.b:hover{border-color:var(--accent)}
+button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.b.danger{color:var(--bad);border-color:var(--bad)}
+button.b.small{padding:5px 9px;font-size:13px}
+button.b:disabled{opacity:.5;cursor:not-allowed}
+button.b:focus-visible,button.link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.link{background:none;border:0;color:var(--accent);font:600 13px var(--body);cursor:pointer;padding:2px 4px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{font:600 13px var(--body);background:var(--surface);color:var(--muted);border:0;padding:7px 12px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.note{font-size:13px;color:var(--muted)}
+.banner{border-radius:var(--r);padding:10px 14px;font-size:14px}
+.banner.warn{background:var(--warn-bg);color:var(--warn)}
+.banner.bad{background:var(--bad-bg);color:var(--bad)}
+.banner.good{background:var(--good-bg);color:var(--good)}
+.tablewrap{overflow-x:auto;min-width:0;border-top:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th{font:600 12px var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;white-space:nowrap}
+tr.total td{font-weight:700;border-top:2px solid var(--ink)}
+tr.prodhead td{background:var(--chip);font:600 15px var(--display);letter-spacing:.04em;text-transform:uppercase}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:8px;vertical-align:baseline}
+.pill{display:inline-block;font:600 11px var(--body);letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:var(--chip);color:var(--muted);white-space:nowrap}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.machine{background:var(--chip);color:var(--accent)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.kpi{border-left:3px solid var(--accent);padding:4px 0 4px 12px;display:grid;gap:2px}
+.kpi .v{font:700 34px/1 var(--display);font-variant-numeric:tabular-nums}
+.kpi .l{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.kpi .s{font-size:12px;color:var(--muted)}
+.timers{display:grid;gap:10px}
+.timer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:4px;background:var(--surface)}
+.timer .who{font-weight:700}
+.timer .what{font-size:13px;color:var(--muted)}
+.timer .el{font:600 20px var(--mono);font-variant-numeric:tabular-nums}
+.timer .act{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.timer .act input{width:110px}
+.empty{padding:18px;border:1px dashed var(--line);border-radius:var(--r);color:var(--muted);font-size:14px;text-align:center}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+.chartbox{overflow-x:auto}
+.chartbox svg{display:block;width:100%;min-width:560px;height:auto}
+.chartbox text{fill:var(--muted);font:11px var(--mono)}
+.meter{height:10px;background:var(--chip);border-radius:999px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent)}
+.meter i.over{background:var(--bad)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chipx{display:inline-flex;align-items:center;gap:4px;background:var(--chip);border-radius:999px;padding:3px 4px 3px 10px;font-size:13px}
+.chipx button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 4px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:4px;font-size:14px;z-index:20}
+.stepgrid input{padding:6px 8px;font-size:13px}
+.stepgrid td{padding:5px 6px}
+.mono{font-family:var(--mono);font-size:13px}
+details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <div class="brand">
+      <svg class="reg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 1v22M1 12h22" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" fill="var(--accent)"/></svg>
+      Print Room Tracker
+    </div>
+    <div class="today" id="clock"></div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="log" aria-selected="true">Floor log</button>
+      <button role="tab" data-tab="dashboard" aria-selected="false">Volume</button>
+      <button role="tab" data-tab="timestudy" aria-selected="false">Time study</button>
+      <button role="tab" data-tab="forecast" aria-selected="false">Forecast</button>
+      <button role="tab" data-tab="setup" aria-selected="false">Setup</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div id="status" class="banner warn" hidden></div>
+
+    <section id="gate" class="card" style="max-width:440px;justify-self:center;width:100%" hidden>
+      <h2>Team passcode</h2>
+      <p class="sub">Enter the print room passcode to open the tracker. This device will remember it.</p>
+      <form id="gateForm" class="section">
+        <label class="f" id="apiWrap">Sheet connection URL<input id="gateApi" type="url" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="f">Passcode<input id="gateKey" type="password" autocomplete="current-password" required></label>
+        <div class="row"><button class="b primary" type="submit">Open tracker</button><span class="note" id="gateMsg" style="color:var(--bad)"></span></div>
+      </form>
+    </section>
+
+    <div id="app" class="section" style="gap:22px" hidden>
+
+    <!-- FLOOR LOG -->
+    <section id="view-log" class="section" data-view="log">
+      <div class="grid2">
+        <div class="card" id="entryCard">
+          <div class="head">
+            <div>
+              <h2 id="formTitle">Start a task</h2>
+              <p class="sub" id="formHint">Start a timer when you begin a step. Stop it with the count when you finish. Start a print run as its own timer, then log your hands-on work while it prints.</p>
+            </div>
+            <div class="seg" role="group" aria-label="Entry mode">
+              <button type="button" id="modeLive" aria-pressed="true">Timer</button>
+              <button type="button" id="modeManual" aria-pressed="false">Past times</button>
+            </div>
+          </div>
+          <form id="entryForm" class="fields" autocomplete="off">
+            <label class="f" id="fEmpWrap">Employee
+              <select id="fEmp"></select>
+            </label>
+            <label class="f">Product
+              <select id="fProd"></select>
+            </label>
+            <label class="f">Step
+              <select id="fStep"></select>
+            </label>
+            <label class="f" id="fDistWrap" hidden>Distributor
+              <select id="fDist"></select>
+            </label>
+            <label class="f" id="fPrinterWrap" hidden>Printer
+              <select id="fPrinter"></select>
+            </label>
+            <label class="f">Quantity <span id="qtyHint" style="text-transform:none;letter-spacing:0;font-weight:400">(units)</span>
+              <input id="fQty" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
+            </label>
+            <label class="f manual" hidden>Date
+              <input id="fDate" type="date">
+            </label>
+            <label class="f manual" hidden>Start
+              <input id="fStart" type="time">
+            </label>
+            <label class="f manual" hidden>End
+              <input id="fEnd" type="time">
+            </label>
+            <label class="f" style="grid-column:1/-1">Note
+              <input id="fNote" type="text" maxlength="200" placeholder="Optional: order #, SKU, issue">
+            </label>
+          </form>
+          <div id="overlapWarn" class="banner warn" hidden></div>
+          <div class="row">
+            <button class="b primary" id="btnStart" type="button">Start timer</button>
+            <button class="b primary" id="btnSave" type="button" hidden>Save entry</button>
+            <button class="b" id="btnCancelEdit" type="button" hidden>Cancel edit</button>
+            <span class="note" id="formMsg"></span>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="head"><h3>Running now</h3><span class="note" id="runCount"></span></div>
+          <div class="timers" id="timers"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="head">
+          <div><h2>Day log</h2><p class="sub">Every finished entry for the day. Rate is units per hour for that entry.</p></div>
+          <div class="row">
+            <label class="f">Date<input id="logDate" type="date"></label>
+            <label class="f">Employee<select id="logEmp"></select></label>
+            <button class="b" id="btnExport" type="button">Export CSV</button>
+          </div>
+        </div>
+        <div class="tablewrap"><table id="logTable"></table></div>
+        <div id="logSummary" class="note"></div>
+      </div>
+    </section>
+
+    <!-- DASHBOARD -->
+    <section id="view-dashboard" class="section" data-view="dashboard" hidden>
+      <div class="head">
+        <div><h2>Volume</h2><p class="sub">Units count when the product's finishing step is logged (Ship for most items, Package for ribbons). Weeks start Monday.</p></div>
+        <div class="row">
+          <label class="f">As of<input id="dashDate" type="date"></label>
+          <div class="seg" role="group" aria-label="Metric">
+            <button type="button" data-metric="units" aria-pressed="true">Units</button>
+            <button type="button" data-metric="labor" aria-pressed="false">Labor hrs</button>
+            <button type="button" data-metric="printer" aria-pressed="false">Printer hrs</button>
+          </div>
+        </div>
+      </div>
+      <div class="kpis" id="kpis"></div>
+      <div class="tablewrap"><table id="volTable"></table></div>
+      <div class="section">
+        <div class="head"><h3>Completed units, last 30 days</h3><div class="legend" id="legend"></div></div>
+        <div class="chartbox" id="chart"></div>
+      </div>
+      <div class="grid2">
+        <div class="section">
+          <h3>Wrapping paper &amp; ribbons by distributor</h3>
+          <div class="tablewrap"><table id="distTable"></table></div>
+        </div>
+        <div class="section">
+          <h3>People, this week</h3>
+          <div class="tablewrap"><table id="empTable"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TIME STUDY -->
+    <section id="view-timestudy" class="section" data-view="timestudy" hidden>
+      <div class="head">
+        <div><h2>Time study</h2><p class="sub">Your current hourly targets next to what the floor is actually doing. A step needs 3 finished entries before its actual rate is trusted for forecasting.</p></div>
+        <div class="row">
+          <label class="f">Look back
+            <select id="tsDays"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">365 days</option></select>
+          </label>
+          <label class="f">Employee<select id="tsEmp"></select></label>
+        </div>
+      </div>
+      <div class="tablewrap"><table id="tsTable"></table></div>
+      <p class="note">Within ±15% of target shows On target. Slower shows the gap in red, faster in green. "Use actual" replaces the target with the measured rate.</p>
+    </section>
+
+    <!-- FORECAST -->
+    <section id="view-forecast" class="section" data-view="forecast" hidden>
+      <div class="head">
+        <div><h2>Forecast</h2><p class="sub">Enter expected volume to see the people-hours and printer-hours it needs. Printer time runs alongside hands-on work, so the two are shown separately.</p></div>
+        <div class="row">
+          <div class="seg" role="group" aria-label="Period">
+            <button type="button" data-period="day" aria-pressed="false">Day</button>
+            <button type="button" data-period="week" aria-pressed="true">Week</button>
+            <button type="button" data-period="month" aria-pressed="false">Month</button>
+          </div>
+          <button class="b" id="btnFillAvg" type="button">Fill from last 4 weeks</button>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="section">
+          <h3>Planned units</h3>
+          <div class="tablewrap"><table id="fcInputs"></table></div>
+        </div>
+        <div class="section">
+          <h3>What it takes</h3>
+          <div id="fcSummary" class="section"></div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Step breakdown</h3>
+        <div class="tablewrap"><table id="fcSteps"></table></div>
+      </div>
+    </section>
+
+    <!-- SETUP -->
+    <section id="view-setup" class="section" data-view="setup" hidden>
+      <div class="head">
+        <div><h2>Setup</h2><p class="sub">Lists and targets the floor log and forecast use. Changes save to the sheet for everyone when you press Save setup.</p></div>
+        <div class="row">
+          <span class="note" id="setupMsg"></span>
+          <button class="b" id="btnSignOut" type="button">Forget passcode on this device</button>
+          <button class="b primary" id="btnSaveSetup" type="button">Save setup</button>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3>Employees</h3>
+          <div class="chips" id="empChips"></div>
+          <div class="row"><input id="newEmp" type="text" placeholder="Name" style="flex:1"><button class="b" type="button" id="addEmp">Add</button></div>
+        </div>
+        <div class="card">
+          <h3>Distributors</h3>
+          <div class="chips" id="distChips"></div>
+          <div class="row"><input id="newDist" type="text" placeholder="Distributor" style="flex:1"><button class="b" type="button" id="addDist">Add</button></div>
+        </div>
+        <div class="card">
+          <h3>Printers</h3>
+          <div id="printerRows" class="section"></div>
+          <div class="row"><button class="b" type="button" id="addPrinter">Add printer</button></div>
+        </div>
+        <div class="card">
+          <h3>Staffing assumptions</h3>
+          <div class="fields">
+            <label class="f">Productive hours per person per day<input id="setHrs" type="number" min="1" max="12" step="0.25"></label>
+            <label class="f">Workdays per week<input id="setDays" type="number" min="1" max="7" step="1"></label>
+          </div>
+          <p class="note">Productive hours leave out breaks and meetings. Forecast staffing divides labor hours by this number.</p>
+        </div>
+      </div>
+      <div class="section">
+        <div class="head"><h3>Products and steps</h3><span class="note">Target = units per hour (your sheet's Hourly Target). Share = fraction of units that go through the step. Overhead steps use hours per day.</span></div>
+        <div id="prodEditor" class="section"></div>
+      </div>
+    </section>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+"use strict";
+// ---------- utilities ----------
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad = n => String(n).padStart(2,"0");
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parseYmd = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
+const monthKey = s => s.slice(0,7);
+const fmtTime = ms => { const d = new Date(ms); let h = d.getHours(); const ap = h>=12?"p":"a"; h = h%12||12; return `${h}:${pad(d.getMinutes())}${ap}`; };
+const fmtNum = (n, dp=0) => (n==null||!isFinite(n)) ? "—" : n.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp});
+const fmtH = h => h==null ? "—" : (h < 10 ? fmtNum(h,1) : fmtNum(h,0));
+const fmtElapsed = ms => { const m = Math.max(0, Math.floor(ms/60000)); return `${Math.floor(m/60)}:${pad(m%60)}`; };
+const hoursOf = e => (e.end && e.start) ? Math.max(0, (e.end - e.start)/3.6e6) : 0;
+const store = { get(k){ try { return localStorage.getItem(k); } catch { return null; } }, set(k,v){ try { localStorage.setItem(k,v); } catch {} } };
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true, 2600); }
+function weekStart(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); const wd=(x.getDay()+6)%7; return addDays(x,-wd); }
+function periodRanges(anchor){
+  const a = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  const ws = weekStart(a);
+  const q = Math.floor(a.getMonth()/3);
+  return {
+    day:[ymd(a), ymd(a)],
+    week:[ymd(ws), ymd(addDays(ws,6))],
+    month:[ymd(new Date(a.getFullYear(),a.getMonth(),1)), ymd(new Date(a.getFullYear(),a.getMonth()+1,0))],
+    quarter:[ymd(new Date(a.getFullYear(),q*3,1)), ymd(new Date(a.getFullYear(),q*3+3,0))],
+    year:[`${a.getFullYear()}-01-01`, `${a.getFullYear()}-12-31`]
+  };
+}
+const inRange = (s, [a,b]) => s >= a && s <= b;
+
+// ---------- connection ----------
+// Paste the Apps Script web app URL here after deploying (ends in /exec).
+const API_URL = "";
+let apiUrl = API_URL || store.get("prt.api") || "";
+let passKey = store.get("prt.key") || "";
+let online = false, canWrite = true, serverTime = 0, pollT = null;
+async function api(params, method){
+  if (!apiUrl) throw new Error("The tracker isn't connected to its sheet yet.");
+  let res;
+  if (method === "POST") res = await fetch(apiUrl, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body: JSON.stringify({ ...params, key: passKey }) });
+  else res = await fetch(apiUrl + "?" + new URLSearchParams({ ...params, key: passKey }).toString());
+  if (!res.ok) throw new Error("The sheet didn't answer (" + res.status + "). Check your connection and try again.");
+  const data = await res.json();
+  if (data.error === "bad_passcode") { lock("That passcode didn't work. Check it with your supervisor."); throw new Error("Passcode needed"); }
+  if (!data.ok) throw new Error(data.error || "The sheet refused the change.");
+  return data;
+}
+
+// ---------- state ----------
+let config = null;            // live setup
+let draft = null;             // setup being edited
+const entries = new Map();    // id -> entry
+let editing = null;           // {id} while editing an entry
+let mode = "live";
+let dashMetric = "units";
+let fcPeriod = "week";
+let fcPlan = {};              // productId -> units
+const todayStr = () => ymd(new Date());
+
+const products = () => (config?.products || []);
+const prod = id => products().find(p => p.id === id);
+const step = (pid, sid) => prod(pid)?.steps.find(s => s.id === sid);
+const colorVar = p => `var(--p${(p?.color ?? 7) % 8})`;
+function allEntries(){ return [...entries.values()].filter(e => !e.deleted); }
+const finished = () => allEntries().filter(e => e.end);
+function applyEntry(e){ if (!e || !e.id) return; if (e.deleted) entries.delete(e.id); else entries.set(e.id, e); }
+function applyConfig(c){
+  if (!c) return;
+  config = c;
+  if (!draft || !setupDirty) draft = structuredClone(config);
+  fillSelects();
+}
+
+// ---------- boot ----------
+async function boot(){
+  $("#logDate").value = todayStr();
+  $("#dashDate").value = todayStr();
+  $("#fDate").value = todayStr();
+  tickClock(); setInterval(tickClock, 30000);
+  renderAll();
+  $("#apiWrap").hidden = !!API_URL;
+  if (!apiUrl || !passKey) return lock();
+  await connect();
+}
+async function connect(){
+  showStatus("Loading the log…", "warn");
+  try {
+    const since = ymd(new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1));
+    const d = await api({ action:"load", since });
+    entries.clear(); d.entries.forEach(applyEntry);
+    applyConfig(d.config); serverTime = d.serverTime;
+    online = true; hideStatus(); $("#gate").hidden = true; $("#app").hidden = false;
+    renderAll(); startPolling();
+  } catch(err) {
+    if (err.message !== "Passcode needed") showStatus("Couldn't load the log: " + err.message, "bad");
+  }
+}
+function lock(msg){
+  online = false; clearInterval(pollT);
+  $("#gate").hidden = false; $("#app").hidden = true; hideStatus();
+  $("#gateMsg").textContent = msg || "";
+  $("#gateKey").value = ""; $("#gateApi").value = apiUrl;
+}
+async function poll(){
+  if (!online || document.hidden) return;
+  try {
+    const d = await api({ action:"changes", after: serverTime });
+    serverTime = d.serverTime;
+    if (d.entries.length || d.config) { d.entries.forEach(applyEntry); if (d.config) applyConfig(d.config); scheduleRender(); }
+    if (!$("#status").classList.contains("good")) hideStatus();
+  } catch(err) { if (online) showStatus("Lost touch with the sheet. Retrying…", "warn"); }
+}
+function startPolling(){ clearInterval(pollT); pollT = setInterval(poll, 20000); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+function showStatus(msg, kind){ const s=$("#status"); s.textContent=msg; s.className="banner "+kind; s.hidden=false; }
+function hideStatus(){ $("#status").hidden = true; }
+function tickClock(){ const d=new Date(); $("#clock").textContent = d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}) + " · " + fmtTime(+d); $$(".el[data-start]").forEach(el => el.textContent = fmtElapsed(Date.now() - Number(el.dataset.start))); }
+let rT=null; function scheduleRender(){ clearTimeout(rT); rT=setTimeout(renderAll, 60); }
+
+// ---------- tabs ----------
+const VIEWS = ["log","dashboard","timestudy","forecast","setup"];
+let view = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : (store.get("prt.view") || "log");
+function setView(v){ view=v; store.set("prt.view", v);
+  $$("nav.tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab===v)));
+  $$("section[data-view]").forEach(s => s.hidden = s.dataset.view !== v);
+  renderAll(); }
+$$("nav.tabs button").forEach(b => b.addEventListener("click", () => setView(b.dataset.tab)));
+
+// ---------- floor log ----------
+function opt(v, label, sel){ return `<option value="${esc(v)}"${sel?" selected":""}>${esc(label ?? v)}</option>`; }
+function fillSelects(){
+  const emps = config?.employees || [];
+  const remembered = store.get("prt.emp");
+  const curEmp = $("#fEmp").value || remembered || "";
+  $("#fEmp").innerHTML = opt("", emps.length ? "Choose…" : "Add employees in Setup") + emps.map(n => opt(n, n, n===curEmp)).join("");
+  const curP = $("#fProd").value;
+  $("#fProd").innerHTML = products().map(p => opt(p.id, p.name, p.id===curP)).join("");
+  for (const id of ["#logEmp","#tsEmp"]) { const c=$(id).value; $(id).innerHTML = opt("", "Everyone") + emps.map(n => opt(n,n,n===c)).join(""); }
+  const curD = $("#fDist").value;
+  $("#fDist").innerHTML = opt("", "—") + (config?.distributors||[]).map(d => opt(d,d,d===curD)).join("");
+  const curPr = $("#fPrinter").value;
+  $("#fPrinter").innerHTML = (config?.printers||[]).map(p => opt(p.name,p.name,p.name===curPr)).join("");
+  fillSteps();
+}
+function fillSteps(keep){
+  const p = prod($("#fProd").value);
+  const cur = keep ?? $("#fStep").value;
+  $("#fStep").innerHTML = (p?.steps||[]).map(s => opt(s.id, s.name + (s.kind==="machine"?" (printer)":""), s.id===cur)).join("");
+  syncFormFields();
+}
+function syncFormFields(){
+  const p = prod($("#fProd").value), s = step($("#fProd").value, $("#fStep").value);
+  const machine = s?.kind === "machine";
+  $("#fPrinterWrap").hidden = !machine;
+  $("#fDistWrap").hidden = !p?.askDistributor;
+  if (p?.askDistributor && !$("#fDist").value && p.defaultDistributor) $("#fDist").value = p.defaultDistributor;
+  $("#fEmpWrap").firstChild.textContent = machine ? "Queued by " : "Employee ";
+  $("#qtyHint").textContent = p?.overhead ? "(optional)" : machine ? "(units printed)" : "(units)";
+}
+$("#fProd").addEventListener("change", () => fillSteps(""));
+$("#fStep").addEventListener("change", syncFormFields);
+$("#fEmp").addEventListener("change", () => store.set("prt.emp", $("#fEmp").value));
+
+function setMode(m){ mode=m;
+  $("#modeLive").setAttribute("aria-pressed", String(m==="live")); $("#modeManual").setAttribute("aria-pressed", String(m==="manual"));
+  $$(".manual").forEach(el => el.hidden = m!=="manual");
+  $("#btnStart").hidden = m!=="live"; $("#btnSave").hidden = m!=="manual";
+  $("#formTitle").textContent = editing ? "Edit entry" : (m==="live" ? "Start a task" : "Log past work");
+  $("#overlapWarn").hidden = true; }
+$("#modeLive").addEventListener("click", () => { if (!editing) setMode("live"); });
+$("#modeManual").addEventListener("click", () => setMode("manual"));
+
+function readForm(){
+  const pid=$("#fProd").value, sid=$("#fStep").value, s=step(pid,sid), p=prod(pid);
+  return { employee: $("#fEmp").value, productId: pid, stepId: sid, kind: s?.kind || "labor",
+    qty: $("#fQty").value === "" ? null : Math.max(0, Number($("#fQty").value)),
+    distributor: p?.askDistributor ? ($("#fDist").value || null) : null,
+    printer: s?.kind==="machine" ? ($("#fPrinter").value || null) : null,
+    note: $("#fNote").value.trim() || null };
+}
+function formMsg(t, bad){ const m=$("#formMsg"); m.textContent=t; m.style.color = bad ? "var(--bad)" : ""; }
+function openTimers(){ return allEntries().filter(e => !e.end).sort((a,b)=>a.start-b.start); }
+
+async function writeEntry(e, id){
+  const d = await api({ action:"upsert", entry: { ...e, id: id || null } }, "POST");
+  applyEntry(d.entry); renderAll();
+  return d.entry.id;
+}
+function guardWrite(){ if (!online) { formMsg("Not connected to the sheet. Reload the page.", true); return false; } return true; }
+
+$("#btnStart").addEventListener("click", async () => {
+  if (!guardWrite()) return;
+  const f = readForm();
+  if (f.kind !== "machine" && !f.employee) return formMsg("Choose who is doing the work.", true);
+  if (!f.productId || !f.stepId) return formMsg("Choose a product and step.", true);
+  if (f.kind === "machine" && !f.printer) return formMsg("Add a printer in Setup first.", true);
+  const clash = f.kind==="labor" ? openTimers().find(t => t.kind==="labor" && t.employee===f.employee) : null;
+  if (clash && !$("#overlapWarn").dataset.ok) {
+    const w=$("#overlapWarn");
+    w.innerHTML = `${esc(f.employee)} already has <b>${esc(prod(clash.productId)?.name)} · ${esc(step(clash.productId, clash.stepId)?.name)}</b> running. One person can only have one hands-on task open. Print runs don't count. <div class="row" style="margin-top:8px"><button class="b small" type="button" id="ovStop">Stop that one in Running now</button><button class="b small" type="button" id="ovAnyway">Start anyway</button></div>`;
+    w.hidden=false;
+    $("#ovStop").onclick = () => { w.hidden=true; document.querySelector(`[data-timer="${clash.id}"] input`)?.focus(); };
+    $("#ovAnyway").onclick = () => { w.dataset.ok="1"; $("#btnStart").click(); };
+    return;
+  }
+  delete $("#overlapWarn").dataset.ok; $("#overlapWarn").hidden = true;
+  const now = Date.now();
+  try {
+    await writeEntry({ ...f, date: ymd(new Date(now)), start: now, end: null, createdAt: now });
+    formMsg(""); $("#fQty").value=""; $("#fNote").value="";
+    toast("Timer started");
+  } catch(err) { formMsg("Couldn't start: " + err.message, true); }
+});
+
+function timeToMs(dateStr, t){ const [h,m] = t.split(":").map(Number); const d=parseYmd(dateStr); d.setHours(h,m,0,0); return +d; }
+$("#btnSave").addEventListener("click", async () => {
+  if (!guardWrite()) return;
+  const f = readForm(), date=$("#fDate").value, st=$("#fStart").value, en=$("#fEnd").value;
+  if (f.kind !== "machine" && !f.employee) return formMsg("Choose who did the work.", true);
+  if (!date || !st || !en) return formMsg("Enter the date, start and end times.", true);
+  let start = timeToMs(date, st), end = timeToMs(date, en);
+  if (end <= start) end += 86400000; // ran past midnight
+  if (f.qty == null && !prod(f.productId)?.overhead) return formMsg("Enter how many units were done.", true);
+  try {
+    const old = editing ? entries.get(editing.id) : null;
+    const entry = { ...f, date, start, end, createdAt: old?.createdAt || Date.now(), editedAt: editing ? Date.now() : null };
+    await writeEntry(entry, editing?.id);
+    toast(editing ? "Entry updated" : "Entry saved");
+    endEdit(); $("#fQty").value=""; $("#fNote").value=""; formMsg("");
+  } catch(err) { formMsg("Couldn't save: " + err.message, true); }
+});
+function endEdit(){ editing=null; $("#btnCancelEdit").hidden=true; setMode("live"); }
+$("#btnCancelEdit").addEventListener("click", endEdit);
+
+function beginEdit(e){
+  editing = {id:e.id};
+  $("#fProd").value = e.productId; fillSteps(e.stepId);
+  $("#fEmp").value = e.employee || ""; $("#fQty").value = e.qty ?? ""; $("#fNote").value = e.note || "";
+  if (e.distributor) $("#fDist").value = e.distributor; if (e.printer) $("#fPrinter").value = e.printer;
+  $("#fDate").value = e.date; const s=new Date(e.start), en=new Date(e.end);
+  $("#fStart").value = `${pad(s.getHours())}:${pad(s.getMinutes())}`; $("#fEnd").value = `${pad(en.getHours())}:${pad(en.getMinutes())}`;
+  setMode("manual"); $("#btnCancelEdit").hidden=false; $("#formTitle").textContent="Edit entry";
+  $("#entryCard").scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+function renderTimers(){
+  const typed = {}; $$("#timers input[id^='q-']").forEach(i => typed[i.id] = i.value);
+  const focusId = document.activeElement?.id;
+  paintTimers();
+  for (const [id,v] of Object.entries(typed)) { const el=document.getElementById(id); if (el) el.value = v; }
+  if (focusId && focusId.startsWith("q-")) document.getElementById(focusId)?.focus();
+}
+function paintTimers(){
+  const list = openTimers();
+  $("#runCount").textContent = list.length ? `${list.length} open` : "";
+  if (!list.length) { $("#timers").innerHTML = `<div class="empty">No timers running. Start one when a step begins; print runs can run alongside hands-on work.</div>`; return; }
+  $("#timers").innerHTML = list.map(t => {
+    const p=prod(t.productId), s=step(t.productId,t.stepId), machine=t.kind==="machine";
+    return `<div class="timer" data-timer="${esc(t.id)}" style="border-left-color:${colorVar(p)}">
+      <div><div class="who">${machine ? esc(t.printer||"Printer") + ` <span class="pill machine">print run</span>` : esc(t.employee)}</div>
+      <div class="what">${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)}${t.distributor?` · ${esc(t.distributor)}`:""} · since ${fmtTime(t.start)}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}</div></div>
+      <div class="el" data-start="${t.start}">${fmtElapsed(Date.now()-t.start)}</div>
+      <div class="act"><input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">
+        <button class="b primary small" type="button" data-stop="${esc(t.id)}">Stop &amp; save</button>
+        <button class="link" type="button" data-discard="${esc(t.id)}">Discard</button></div></div>`;
+  }).join("");
+}
+$("#timers").addEventListener("click", async ev => {
+  const stopId = ev.target.dataset.stop, discId = ev.target.dataset.discard;
+  if (!stopId && !discId) return;
+  if (!guardWrite()) return;
+  const t = openTimers().find(x => x.id === (stopId||discId)); if (!t) return;
+  if (discId) {
+    if (ev.target.dataset.armed) { try { applyEntry((await api({ action:"delete", id:t.id }, "POST")).entry); renderAll(); toast("Timer discarded"); } catch(err){ toast("Couldn't discard: " + err.message); } }
+    else { ev.target.dataset.armed="1"; ev.target.textContent="Tap again to discard"; setTimeout(()=>{ if(ev.target.isConnected){ delete ev.target.dataset.armed; ev.target.textContent="Discard"; } }, 4000); }
+    return;
+  }
+  const q = $(`#q-${CSS.escape(t.id)}`).value;
+  if (q === "" && !prod(t.productId)?.overhead) { $(`#q-${CSS.escape(t.id)}`).focus(); toast("Enter the units finished first"); return; }
+  ev.target.disabled = true;
+  try { applyEntry((await api({ action:"stop", id:t.id, end: Date.now(), qty: q }, "POST")).entry); renderAll(); toast("Saved"); }
+  catch(err){ ev.target.disabled=false; toast("Couldn't stop: " + err.message); }
+});
+
+function renderLog(){
+  const day = $("#logDate").value || todayStr(), emp = $("#logEmp").value;
+  const rows = finished().filter(e => e.date===day && (!emp || e.employee===emp)).sort((a,b)=>a.start-b.start);
+  if (!rows.length) { $("#logTable").innerHTML = `<tbody><tr><td><div class="empty">Nothing finished on this day yet. Stopped timers and past-time entries show up here.</div></td></tr></tbody>`; $("#logSummary").textContent=""; return; }
+  $("#logTable").innerHTML = `<thead><tr><th>Time</th><th>Who</th><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Min</th><th class="n">Units/hr</th><th>Detail</th><th></th></tr></thead><tbody>` +
+    rows.map(e => { const p=prod(e.productId), s=step(e.productId,e.stepId), h=hoursOf(e), rate = e.qty && h ? e.qty/h : null;
+      return `<tr><td class="mono">${fmtTime(e.start)}–${fmtTime(e.end)}</td>
+      <td>${e.kind==="machine" ? `<span class="pill machine">${esc(e.printer||"printer")}</span>` : esc(e.employee)}</td>
+      <td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p?.name||e.productId)}</td>
+      <td>${esc(s?.name||e.stepId)}</td><td class="n">${fmtNum(e.qty)}</td><td class="n">${fmtNum(h*60)}</td><td class="n">${rate?fmtNum(rate,1):"—"}</td>
+      <td class="note">${esc([e.distributor, e.note].filter(Boolean).join(" · "))}</td>
+      <td style="white-space:nowrap"><button class="link" data-edit="${esc(e.id)}">Edit</button><button class="link" data-del="${esc(e.id)}" style="color:var(--bad)">Delete</button></td></tr>`; }).join("") + `</tbody>`;
+  const lab = rows.filter(e=>e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0), mac = rows.filter(e=>e.kind==="machine").reduce((a,e)=>a+hoursOf(e),0);
+  $("#logSummary").textContent = `${rows.length} entries · ${fmtH(lab)} labor hours · ${fmtH(mac)} printer hours`;
+}
+$("#logTable").addEventListener("click", async ev => {
+  const id = ev.target.dataset.edit || ev.target.dataset.del; if (!id) return;
+  const e = finished().find(x => x.id===id); if (!e) return;
+  if (ev.target.dataset.edit) return beginEdit(e);
+  if (!guardWrite()) return;
+  if (!ev.target.dataset.armed) { ev.target.dataset.armed="1"; ev.target.textContent="Confirm delete"; setTimeout(()=>{ if(ev.target.isConnected){ delete ev.target.dataset.armed; ev.target.textContent="Delete"; } }, 4000); return; }
+  try { applyEntry((await api({ action:"delete", id:e.id }, "POST")).entry); renderAll(); toast("Entry deleted"); } catch(err){ toast("Couldn't delete: "+err.message); }
+});
+$("#logDate").addEventListener("change", renderLog);
+$("#logEmp").addEventListener("change", renderLog);
+
+$("#btnExport").addEventListener("click", async () => {
+  const rows = finished().sort((a,b)=>a.start-b.start);
+  const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+  const lines = [["Date","Start","End","Minutes","Employee","Product","Step","Kind","Units","Distributor","Printer","Note"].join(",")]
+    .concat(rows.map(e => [e.date, new Date(e.start).toLocaleTimeString(), new Date(e.end).toLocaleTimeString(), (hoursOf(e)*60).toFixed(1), e.employee, prod(e.productId)?.name||e.productId, step(e.productId,e.stepId)?.name||e.stepId, e.kind, e.qty ?? "", e.distributor, e.printer, e.note].map(q).join(",")));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type:"text/csv" }));
+  a.download = `print-room-log-${todayStr()}.csv`; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+});
+
+// ---------- dashboard ----------
+function metricFor(entries, p, metric){
+  if (metric === "units") return p.completeStep ? entries.filter(e => e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0) : null;
+  const kind = metric === "labor" ? "labor" : "machine";
+  return entries.filter(e => e.productId===p.id && e.kind===kind).reduce((a,e)=>a+hoursOf(e),0);
+}
+function renderDashboard(){
+  const anchor = parseYmd($("#dashDate").value || todayStr());
+  const R = periodRanges(anchor), all = finished();
+  const cols = [["day","Day"],["week","Week"],["month","Month"],["quarter","Quarter"],["year","Year"]];
+  const byP = Object.fromEntries(cols.map(([k]) => [k, all.filter(e => inRange(e.date, R[k]))]));
+  // KPIs for the week
+  const wk = byP.week;
+  const units = products().reduce((a,p)=>a+(metricFor(wk,p,"units")||0),0);
+  const lab = wk.filter(e=>e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0);
+  const mac = wk.filter(e=>e.kind==="machine").reduce((a,e)=>a+hoursOf(e),0);
+  const days = new Set(wk.map(e=>e.date)).size;
+  $("#kpis").innerHTML = [
+    [fmtNum(units), "Units completed", `Week of ${parseYmd(R.week[0]).toLocaleDateString(undefined,{month:"short",day:"numeric"})}`],
+    [fmtH(lab), "Labor hours", days ? `${fmtH(lab/days)} per working day` : "No time logged"],
+    [units && lab ? fmtNum(units/lab,1) : "—", "Units per labor hour", "All steps, all products"],
+    [fmtH(mac), "Printer hours", "Print runs, any printer"]
+  ].map(([v,l,s]) => `<div class="kpi"><span class="l">${l}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></div>`).join("");
+  // matrix
+  const fmt = v => v==null ? "—" : dashMetric==="units" ? fmtNum(v) : fmtH(v);
+  const prods = products().filter(p => dashMetric!=="units" || p.completeStep);
+  const totals = Object.fromEntries(cols.map(([k]) => [k, 0]));
+  let body = prods.map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td>` + cols.map(([k]) => { const v = metricFor(byP[k], p, dashMetric); totals[k] += v||0; return `<td class="n">${fmt(v)}</td>`; }).join("") + `</tr>`).join("");
+  body += `<tr class="total"><td>Total</td>${cols.map(([k]) => `<td class="n">${fmt(totals[k])}</td>`).join("")}</tr>`;
+  const label = (k) => { const [a,b]=R[k]; const A=parseYmd(a), B=parseYmd(b); const o={month:"short",day:"numeric"};
+    return k==="day" ? A.toLocaleDateString(undefined,o) : k==="week" ? `${A.toLocaleDateString(undefined,o)}–${B.toLocaleDateString(undefined,o)}` : k==="month" ? A.toLocaleDateString(undefined,{month:"long"}) : k==="quarter" ? `Q${Math.floor(A.getMonth()/3)+1}` : String(A.getFullYear()); };
+  $("#volTable").innerHTML = `<thead><tr><th>${dashMetric==="units"?"Units completed":dashMetric==="labor"?"Labor hours":"Printer hours"}</th>${cols.map(([k,n]) => `<th class="n">${n}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${label(k)}</span></th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+  renderChart(anchor, all);
+  // distributors (year to date)
+  const distP = products().filter(p => p.askDistributor);
+  const yr = byP.year, mo = byP.month;
+  const dists = [...new Set(yr.filter(e => distP.some(p=>p.id===e.productId) && e.distributor).map(e=>e.distributor))].sort();
+  if (!dists.length) $("#distTable").innerHTML = `<tbody><tr><td><div class="empty">No wrapping paper or ribbon shipments with a distributor logged this year.</div></td></tr></tbody>`;
+  else $("#distTable").innerHTML = `<thead><tr><th>Distributor</th>${distP.map(p=>`<th class="n">${esc(p.name.replace("Wrapping Paper – ","Wrap "))}</th>`).join("")}<th class="n">This month</th></tr></thead><tbody>` +
+    dists.map(d => `<tr><td>${esc(d)}</td>${distP.map(p => `<td class="n">${fmtNum(yr.filter(e=>e.distributor===d && e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0))}</td>`).join("")}<td class="n">${fmtNum(mo.filter(e=>e.distributor===d && distP.some(p=>p.id===e.productId && e.stepId===p.completeStep)).reduce((a,e)=>a+(e.qty||0),0))}</td></tr>`).join("") + `</tbody>`;
+  // employees this week
+  const emps = [...new Set(wk.filter(e=>e.kind==="labor").map(e=>e.employee))].sort();
+  if (!emps.length) $("#empTable").innerHTML = `<tbody><tr><td><div class="empty">No hands-on time logged this week.</div></td></tr></tbody>`;
+  else $("#empTable").innerHTML = `<thead><tr><th>Employee</th><th class="n">Entries</th><th class="n">Labor hrs</th><th>Most time on</th></tr></thead><tbody>` +
+    emps.map(n => { const es = wk.filter(e=>e.kind==="labor" && e.employee===n); const by={}; es.forEach(e=>{ const k=e.productId+"|"+e.stepId; by[k]=(by[k]||0)+hoursOf(e); }); const top=Object.entries(by).sort((a,b)=>b[1]-a[1])[0]; const [pid,sid]=top?top[0].split("|"):[];
+      return `<tr><td>${esc(n)}</td><td class="n">${es.length}</td><td class="n">${fmtH(es.reduce((a,e)=>a+hoursOf(e),0))}</td><td class="note">${top?esc(`${prod(pid)?.name||pid} · ${step(pid,sid)?.name||sid}`):""}</td></tr>`; }).join("") + `</tbody>`;
+}
+function renderChart(anchor, all){
+  const days = Array.from({length:30}, (_,i) => ymd(addDays(anchor, i-29)));
+  const ps = products().filter(p => p.completeStep);
+  const data = days.map(d => ps.map(p => all.filter(e => e.date===d && e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0)));
+  const maxV = Math.max(0, ...data.map(r => r.reduce((a,b)=>a+b,0)));
+  $("#legend").innerHTML = ps.map(p => `<span><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</span>`).join("");
+  const W=720,H=240,L=40,Rr=8,T=10,B=26, iw=W-L-Rr, ih=H-T-B;
+  const step = maxV<=5?1:Math.pow(10,Math.floor(Math.log10(maxV/4)))*[1,2,5,10].find(m=>Math.pow(10,Math.floor(Math.log10(maxV/4)))*m>=maxV/4);
+  const top = maxV ? Math.ceil(maxV/step)*step : 4, y = v => T + ih - v/top*ih;
+  const bw = iw/30;
+  let g = "";
+  for (let v=0; v<=top; v+=(maxV?step:1)) g += `<line x1="${L}" x2="${W-Rr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`;
+  data.forEach((row,i) => { let acc=0; row.forEach((v,j) => { if(!v) return; const y0=y(acc), y1=y(acc+v); acc+=v; g += `<rect x="${(L+i*bw+1.5).toFixed(1)}" y="${y1.toFixed(1)}" width="${(bw-3).toFixed(1)}" height="${Math.max(0,y0-y1).toFixed(1)}" fill="${colorVar(ps[j])}"><title>${days[i]} · ${esc(ps[j].name)}: ${v}</title></rect>`; }); });
+  days.forEach((d,i) => { if (i%5===4 || i===29) g += `<text x="${(L+i*bw+bw/2).toFixed(1)}" y="${H-8}" text-anchor="middle">${parseYmd(d).toLocaleDateString(undefined,{month:"numeric",day:"numeric"})}</text>`; });
+  $("#chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Completed units per day for the last 30 days">${g}${maxV?"":`<text x="${L+iw/2}" y="${T+ih/2}" text-anchor="middle">No completed units in these 30 days</text>`}</svg>`;
+}
+$("#dashDate").addEventListener("change", renderDashboard);
+$$("[data-metric]").forEach(b => b.addEventListener("click", () => { dashMetric=b.dataset.metric; $$("[data-metric]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); renderDashboard(); }));
+
+// ---------- time study ----------
+function rates(days, emp){
+  const since = ymd(addDays(new Date(), -days+1));
+  const es = finished().filter(e => e.date >= since && (!emp || e.employee===emp));
+  const out = {};
+  for (const e of es) { const k=e.productId+"|"+e.stepId; const r = out[k] ||= {units:0,hours:0,n:0}; if (e.qty>0) { r.units+=e.qty; r.hours+=hoursOf(e); r.n++; } else if (prod(e.productId)?.overhead) { r.hours+=hoursOf(e); r.n++; } }
+  for (const r of Object.values(out)) r.rate = r.hours>0 && r.units>0 ? r.units/r.hours : null;
+  const workdays = new Set(es.map(e=>e.date)).size;
+  return { by: out, workdays };
+}
+function verdict(est, act){ if (!est || !act) return ""; const d=(act-est)/est; if (Math.abs(d)<=0.15) return `<span class="pill good">On target</span>`; return d<0 ? `<span class="pill bad">${fmtNum(Math.abs(d)*100)}% slower</span>` : `<span class="pill good">${fmtNum(d*100)}% faster</span>`; }
+function renderTimeStudy(){
+  const days = Number($("#tsDays").value), emp = $("#tsEmp").value, {by, workdays} = rates(days, emp);
+  let html = `<thead><tr><th>Step</th><th class="n">Target /hr</th><th class="n">Actual /hr</th><th>vs target</th><th class="n">Entries</th><th class="n">Units</th><th class="n">Hours</th><th class="n">Min / unit</th><th></th></tr></thead><tbody>`;
+  for (const p of products()) {
+    html += `<tr class="prodhead"><td colspan="9"><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td></tr>`;
+    for (const s of p.steps) {
+      const r = by[p.id+"|"+s.id] || {units:0,hours:0,n:0,rate:null};
+      if (p.overhead) { const perDay = workdays ? r.hours/workdays : null;
+        html += `<tr><td>${esc(s.name)}</td><td class="n">${fmtNum(s.perDay,2)} h/day</td><td class="n">${perDay!=null&&r.n?fmtNum(perDay,2)+" h/day":"—"}</td><td></td><td class="n">${r.n}</td><td class="n">—</td><td class="n">${fmtH(r.hours)}</td><td class="n">—</td><td></td></tr>`; continue; }
+      const trusted = r.n >= 3 && r.rate;
+      html += `<tr><td>${esc(s.name)} ${s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${s.est?fmtNum(s.est,0):"—"}</td><td class="n">${r.rate?fmtNum(r.rate,1):"—"}</td>
+        <td>${r.rate ? (s.est ? verdict(s.est, r.rate) : `<span class="pill warn">No target</span>`) : (s.est?`<span class="pill">Needs data</span>`:`<span class="pill warn">No data</span>`)}${r.rate && !trusted ? ` <span class="note">(${r.n} of 3)</span>`:""}</td>
+        <td class="n">${r.n}</td><td class="n">${fmtNum(r.units)}</td><td class="n">${fmtH(r.hours)}</td><td class="n">${r.rate?fmtNum(60/r.rate,1):"—"}</td>
+        <td>${trusted && online && !emp ? `<button class="link" data-adopt="${esc(p.id)}|${esc(s.id)}|${r.rate.toFixed(1)}">Use actual</button>`:""}</td></tr>`;
+    }
+  }
+  $("#tsTable").innerHTML = products().length ? html + `</tbody>` : `<tbody><tr><td><div class="empty">Add products in Setup to see the time study.</div></td></tr></tbody>`;
+}
+$("#tsTable").addEventListener("click", async ev => {
+  const a = ev.target.dataset.adopt; if (!a || !config) return;
+  const [pid,sid,rate] = a.split("|"); const next = structuredClone(config); const s = next.products.find(p=>p.id===pid)?.steps.find(x=>x.id===sid); if (!s) return;
+  s.est = Math.round(Number(rate)*10)/10;
+  try { const d = await api({ action:"saveConfig", config: next }, "POST"); applyConfig(next); renderAll(); toast(`Target set to ${s.est}/hr`); } catch(err){ toast("Couldn't save: "+err.message); }
+});
+$("#tsDays").addEventListener("change", renderTimeStudy);
+$("#tsEmp").addEventListener("change", renderTimeStudy);
+
+// ---------- forecast ----------
+const periodDays = () => fcPeriod==="day" ? 1 : fcPeriod==="week" ? (config?.workdaysPerWeek||5) : Math.round((config?.workdaysPerWeek||5)*52/12);
+function stepPlan(days=90){
+  const {by, workdays} = rates(days);
+  // completed units per product in lookback, for measured shares
+  const since = ymd(addDays(new Date(), -days+1)), es = finished().filter(e=>e.date>=since);
+  const done = {}; for (const p of products()) if (p.completeStep) done[p.id] = es.filter(e=>e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0);
+  return { by, workdays, done };
+}
+function computeForecast(){
+  const {by, workdays, done} = stepPlan(90), D = periodDays();
+  const lines = []; let labor=0, printer=0, missing=0;
+  for (const p of products()) {
+    if (p.overhead) { for (const s of p.steps) { const r=by[p.id+"|"+s.id]; const perDay = r && r.n>=3 && workdays ? r.hours/workdays : (s.perDay||0); const h=perDay*D; labor+=h; lines.push({p,s,units:null,share:null,rate:null,src:r&&r.n>=3?"actual":"setup",hours:h}); } continue; }
+    const U = Number(fcPlan[p.id]||0); if (!U) continue;
+    for (const s of p.steps) {
+      const r = by[p.id+"|"+s.id];
+      const measuredShare = done[p.id] >= 10 && r ? Math.min(2, r.units/done[p.id]) : null;
+      const share = measuredShare ?? (s.share ?? 1);
+      const rate = r && r.n>=3 && r.rate ? r.rate : s.est || null;
+      const src = r && r.n>=3 && r.rate ? "actual" : s.est ? "target" : "missing";
+      const hours = rate ? U*share/rate : null;
+      if (hours==null && share>0) missing++;
+      if (hours) { if (s.kind==="machine") printer+=hours; else labor+=hours; }
+      lines.push({p,s,units:U*share,share,rate,src,hours});
+    }
+  }
+  return {lines, labor, printer, missing, D};
+}
+function renderForecast(){
+  $("#fcInputs").innerHTML = `<thead><tr><th>Product</th><th class="n">Planned units</th><th class="n">Avg / ${fcPeriod}</th></tr></thead><tbody>` +
+    products().filter(p=>!p.overhead).map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td><td class="n"><input type="number" min="0" step="1" inputmode="numeric" id="fc-${esc(p.id)}" data-fc="${esc(p.id)}" value="${fcPlan[p.id] ?? ""}" style="width:100px;text-align:right"></td><td class="n">${fmtNum(avgVolume(p))}</td></tr>`).join("") + `</tbody>`;
+  renderForecastOut();
+}
+function avgVolume(p){ const since=ymd(addDays(new Date(),-27)); const u=finished().filter(e=>e.date>=since && e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0); const perDay=u/(4*(config?.workdaysPerWeek||5)); return perDay*periodDays(); }
+function renderForecastOut(){
+  const f = computeForecast(), hpp = config?.productiveHoursPerPerson || 6.5;
+  const capPrinter = (config?.printers||[]).reduce((a,p)=>a+(Number(p.hoursPerDay)||0),0) * f.D;
+  const people = f.labor / (hpp * f.D);
+  const util = capPrinter ? f.printer/capPrinter : null;
+  const bottleneck = util!=null && f.printer>0 ? (f.printer/capPrinter > f.labor/(hpp*f.D*Math.max(1,Math.ceil(people))) ? "printer" : "people") : null;
+  $("#fcSummary").innerHTML = `<div class="kpis">
+    <div class="kpi"><span class="l">Labor hours</span><span class="v">${fmtH(f.labor)}</span><span class="s">incl. overhead, per ${fcPeriod}</span></div>
+    <div class="kpi"><span class="l">People needed</span><span class="v">${fmtNum(people,1)}</span><span class="s">at ${hpp} productive hrs × ${f.D} day${f.D>1?"s":""}</span></div>
+    <div class="kpi"><span class="l">Printer hours</span><span class="v">${f.printer?fmtH(f.printer):"—"}</span><span class="s">${capPrinter?`of ${fmtH(capPrinter)} available`:"Add printers in Setup"}</span></div></div>
+    ${util!=null && f.printer ? `<div class="section"><div class="head"><span class="note">Printer load</span><span class="mono">${fmtNum(util*100)}%</span></div><div class="meter"><i class="${util>1?"over":""}" style="width:${Math.min(100,util*100)}%"></i></div></div>`:""}
+    ${util>1 ? `<div class="banner bad">Printers are over capacity. The print queue, not staffing, sets the pace for this volume.</div>` : ""}
+    ${f.missing ? `<div class="banner warn">${f.missing} step${f.missing>1?"s have":" has"} no target and not enough logged time, so ${f.missing>1?"they're":"it's"} left out. Log a few entries for ${f.missing>1?"them":"it"} or add a target in Setup.</div>` : ""}
+    ${!Object.values(fcPlan).some(Number) ? `<div class="empty">Enter planned units, or fill from the last 4 weeks. Overhead is already included.</div>`:""}`;
+  const L = f.lines.filter(l => l.hours || l.src==="missing");
+  $("#fcSteps").innerHTML = !L.length ? `<tbody><tr><td><div class="empty">The breakdown appears once there are planned units.</div></td></tr></tbody>` :
+    `<thead><tr><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Rate /hr</th><th>Rate from</th><th class="n">Hours</th></tr></thead><tbody>` +
+    L.map(l => `<tr><td><span class="sw" style="background:${colorVar(l.p)}"></span>${esc(l.p.name)}</td><td>${esc(l.s.name)} ${l.s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${l.units==null?"—":fmtNum(l.units)}</td><td class="n">${l.rate?fmtNum(l.rate,1):"—"}</td><td><span class="pill ${l.src==="actual"?"good":l.src==="missing"?"warn":""}">${l.p.overhead?(l.src==="actual"?"logged avg":"setup h/day"):l.src}</span></td><td class="n">${l.hours?fmtH(l.hours):"—"}</td></tr>`).join("") + `</tbody>`;
+}
+$("#fcInputs").addEventListener("input", ev => { const id=ev.target.dataset.fc; if (!id) return; fcPlan[id] = ev.target.value===""?"":Number(ev.target.value); renderForecastOut(); });
+$("#btnFillAvg").addEventListener("click", () => { for (const p of products()) if (!p.overhead) fcPlan[p.id] = Math.round(avgVolume(p)); renderForecast(); });
+$$("[data-period]").forEach(b => b.addEventListener("click", () => { fcPeriod=b.dataset.period; $$("[data-period]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); renderForecast(); }));
+
+// ---------- setup ----------
+let setupDirty = false;
+function markDirty(){ setupDirty = true; $("#setupMsg").textContent = "Unsaved changes"; }
+function renderSetup(){
+  if (!draft) { $("#prodEditor").innerHTML = `<div class="empty">Setup hasn't loaded. Check the connection to the sheet and reload.</div>`; return; }
+  $("#empChips").innerHTML = draft.employees.length ? draft.employees.map((n,i)=>`<span class="chipx">${esc(n)}<button type="button" aria-label="Remove ${esc(n)}" data-rm-emp="${i}">×</button></span>`).join("") : `<span class="note">No employees yet.</span>`;
+  $("#distChips").innerHTML = draft.distributors.map((n,i)=>`<span class="chipx">${esc(n)}<button type="button" aria-label="Remove ${esc(n)}" data-rm-dist="${i}">×</button></span>`).join("");
+  $("#printerRows").innerHTML = draft.printers.map((p,i)=>`<div class="row"><label class="f" style="flex:2">Name<input type="text" id="pr-n-${i}" data-pr="${i}" data-k="name" value="${esc(p.name)}"></label><label class="f" style="flex:1">Hours / day<input type="number" min="0" max="24" step="0.5" id="pr-h-${i}" data-pr="${i}" data-k="hoursPerDay" value="${p.hoursPerDay}"></label><button class="link" type="button" data-rm-pr="${i}" style="color:var(--bad);padding-bottom:10px">Remove</button></div>`).join("");
+  $("#setHrs").value = draft.productiveHoursPerPerson; $("#setDays").value = draft.workdaysPerWeek;
+  $("#prodEditor").innerHTML = draft.products.map((p,pi) => `<details ${pi===0?"open":""}><summary><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)} <span class="note">· ${p.steps.length} steps</span></summary>
+    <div class="tablewrap" style="margin-top:8px"><table class="stepgrid"><thead><tr><th>Step</th><th>Kind</th><th class="n">${p.overhead?"Hours / day":"Target / hr"}</th>${p.overhead?"":`<th class="n">Share</th><th>Counts volume</th>`}<th></th></tr></thead><tbody>
+    ${p.steps.map((s,si) => `<tr><td><input type="text" id="s-${pi}-${si}-n" data-p="${pi}" data-s="${si}" data-k="name" value="${esc(s.name)}" style="min-width:180px"></td>
+      <td><select id="s-${pi}-${si}-k" data-p="${pi}" data-s="${si}" data-k="kind" style="width:auto">${opt("labor","Hands-on",s.kind==="labor")}${opt("machine","Printer",s.kind==="machine")}</select></td>
+      <td class="n"><input type="number" min="0" step="0.1" id="s-${pi}-${si}-e" data-p="${pi}" data-s="${si}" data-k="${p.overhead?"perDay":"est"}" value="${(p.overhead?s.perDay:s.est) ?? ""}" style="width:90px;text-align:right" placeholder="—"></td>
+      ${p.overhead?"":`<td class="n"><input type="number" min="0" max="2" step="0.05" id="s-${pi}-${si}-s" data-p="${pi}" data-s="${si}" data-k="share" value="${s.share ?? 1}" style="width:80px;text-align:right"></td>
+      <td><input type="radio" name="cs-${pi}" id="s-${pi}-${si}-c" data-p="${pi}" data-s="${si}" data-k="complete" ${p.completeStep===s.id?"checked":""} style="width:auto" aria-label="Count volume at ${esc(s.name)}"></td>`}
+      <td><button class="link" type="button" data-rm-step="${pi}|${si}" style="color:var(--bad)">Remove</button></td></tr>`).join("")}
+    </tbody></table></div><div class="row" style="margin-top:8px"><button class="b small" type="button" data-add-step="${pi}">Add step</button>
+    ${p.overhead?"":`<label class="f" style="flex-direction:row;display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="ad-${pi}" data-ask="${pi}" ${p.askDistributor?"checked":""} style="width:auto"> Ask for distributor</label>`}</div></details>`).join("");
+}
+$("#view-setup").addEventListener("input", ev => {
+  const t = ev.target; if (!draft) return;
+  if (t.dataset.pr != null) { const p = draft.printers[+t.dataset.pr]; p[t.dataset.k] = t.dataset.k==="name" ? t.value : Number(t.value); markDirty(); }
+  else if (t.dataset.s != null) { const p=draft.products[+t.dataset.p], s=p.steps[+t.dataset.s], k=t.dataset.k;
+    if (k==="complete") p.completeStep = s.id; else if (k==="name"||k==="kind") s[k]=t.value; else s[k] = t.value===""?null:Number(t.value); markDirty(); }
+  else if (t.dataset.ask != null) { draft.products[+t.dataset.ask].askDistributor = t.checked; markDirty(); }
+  else if (t.id==="setHrs") { draft.productiveHoursPerPerson = Number(t.value)||6.5; markDirty(); }
+  else if (t.id==="setDays") { draft.workdaysPerWeek = Number(t.value)||5; markDirty(); }
+});
+$("#view-setup").addEventListener("click", ev => {
+  const d = ev.target.dataset; if (!draft) return;
+  if (d.rmEmp != null) { draft.employees.splice(+d.rmEmp,1); }
+  else if (d.rmDist != null) { draft.distributors.splice(+d.rmDist,1); }
+  else if (d.rmPr != null) { draft.printers.splice(+d.rmPr,1); }
+  else if (d.rmStep) { const [pi,si]=d.rmStep.split("|").map(Number); draft.products[pi].steps.splice(si,1); }
+  else if (d.addStep != null) { const p=draft.products[+d.addStep]; p.steps.push(p.overhead?{id:"s"+Date.now().toString(36),name:"New task",kind:"labor",perDay:0}:{id:"s"+Date.now().toString(36),name:"New step",kind:"labor",est:null,share:1}); }
+  else if (ev.target.id==="addPrinter") { draft.printers.push({name:`Printer ${draft.printers.length+1}`, hoursPerDay:8}); }
+  else return;
+  markDirty(); renderSetup();
+});
+function addFromInput(inputId, listKey){ const v=$(inputId).value.trim(); if (!v || !draft) return; if (!draft[listKey].includes(v)) draft[listKey].push(v); $(inputId).value=""; markDirty(); renderSetup(); }
+$("#addEmp").addEventListener("click", () => addFromInput("#newEmp","employees"));
+$("#addDist").addEventListener("click", () => addFromInput("#newDist","distributors"));
+$("#newEmp").addEventListener("keydown", e => { if (e.key==="Enter") { e.preventDefault(); addFromInput("#newEmp","employees"); } });
+$("#newDist").addEventListener("keydown", e => { if (e.key==="Enter") { e.preventDefault(); addFromInput("#newDist","distributors"); } });
+$("#btnSaveSetup").addEventListener("click", async () => {
+  if (!online || !draft) return toast("Not connected to the sheet.");
+  try { await api({ action:"saveConfig", config: draft }, "POST"); setupDirty=false; applyConfig(structuredClone(draft)); renderAll(); $("#setupMsg").textContent=""; toast("Setup saved"); }
+  catch(err){ $("#setupMsg").textContent = "Couldn't save: " + err.message; }
+});
+
+// ---------- render ----------
+function renderAll(){
+  if (view==="log") { renderTimers(); renderLog(); }
+  else if (view==="dashboard") renderDashboard();
+  else if (view==="timestudy") renderTimeStudy();
+  else if (view==="forecast") { if (document.activeElement?.dataset?.fc) renderForecastOut(); else renderForecast(); }
+  else if (view==="setup" && !(setupDirty && $("#view-setup").contains(document.activeElement))) renderSetup();
+}
+$("#gateForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  passKey = $("#gateKey").value.trim();
+  if (!API_URL) apiUrl = $("#gateApi").value.trim();
+  if (!apiUrl) { $("#gateMsg").textContent = "Paste the sheet connection URL."; return; }
+  $("#gateMsg").textContent = "";
+  try { await api({ action:"ping" }); } catch(err) { if (err.message !== "Passcode needed") $("#gateMsg").textContent = err.message; return; }
+  store.set("prt.key", passKey); if (!API_URL) store.set("prt.api", apiUrl);
+  connect();
+});
+$("#btnSignOut").addEventListener("click", () => { store.set("prt.key", ""); passKey = ""; lock(); });
+setView(view);
+boot();
+})();
+</script>
