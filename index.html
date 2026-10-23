@@ -275,11 +275,13 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
     <!-- DASHBOARD -->
     <section id="view-dashboard" class="section" data-view="dashboard" hidden>
       <div class="head">
-        <div><h2>Volume</h2><p class="sub">Units count when the product's finishing step is logged (Ship for most items, Package for ribbons). Weeks start Monday.</p></div>
+        <div><h2>Volume</h2><p class="sub">Started counts units at each product's first step, Printed at its print run, and Finished at its finishing step (Ship for most items, Package for ribbons). Weeks start Monday.</p></div>
         <div class="row">
           <label class="f">As of<input id="dashDate" type="date"></label>
           <div class="seg" role="group" aria-label="Metric">
-            <button type="button" data-metric="units" aria-pressed="true">Units</button>
+            <button type="button" data-metric="started" aria-pressed="false">Started</button>
+            <button type="button" data-metric="printed" aria-pressed="true">Printed</button>
+            <button type="button" data-metric="finished" aria-pressed="false">Finished</button>
             <button type="button" data-metric="labor" aria-pressed="false">Labor hrs</button>
             <button type="button" data-metric="printer" aria-pressed="false">Printer hrs</button>
           </div>
@@ -288,7 +290,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
       <div class="kpis" id="kpis"></div>
       <div class="tablewrap"><table id="volTable"></table></div>
       <div class="section">
-        <div class="head"><h3>Completed units, last 30 days</h3><div class="legend" id="legend"></div></div>
+        <div class="head"><h3 id="chartTitle">Printed units, last 30 days</h3><div class="legend" id="legend"></div></div>
         <div class="chartbox" id="chart"></div>
       </div>
       <div class="grid2">
@@ -450,7 +452,9 @@ let draft = null;             // setup being edited
 const entries = new Map();    // id -> entry
 let editing = null;           // {id} while editing an entry
 let mode = "live";
-let dashMetric = "units";
+const UNIT_STAGES = { started:"Started", printed:"Printed", finished:"Finished" };
+const savedMetric = store.get("prt.metric");
+let dashMetric = (UNIT_STAGES[savedMetric] || savedMetric === "labor" || savedMetric === "printer") ? savedMetric : "printed";
 let fcPeriod = "week";
 let fcPlan = {};              // productId -> units
 const todayStr = () => ymd(new Date());
@@ -832,8 +836,16 @@ $("#btnExport").addEventListener("click", async () => {
 });
 
 // ---------- dashboard ----------
+// Which step a unit is counted at for each stage. Printed uses the product's first printer step only, so a reprint step never double counts.
+function stageStep(p, stage){
+  if (!p || p.overhead) return null;
+  if (stage === "started") return p.steps[0]?.id || null;
+  if (stage === "printed") return p.steps.find(s => s.kind === "machine")?.id || null;
+  if (stage === "finished") return p.completeStep || null;
+  return null;
+}
 function metricFor(entries, p, metric){
-  if (metric === "units") return p.completeStep ? entries.filter(e => e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0) : null;
+  if (UNIT_STAGES[metric]) { const sid = stageStep(p, metric); return sid ? entries.filter(e => e.productId===p.id && e.stepId===sid).reduce((a,e)=>a+(Number(e.qty)||0),0) : null; }
   const kind = metric === "labor" ? "labor" : "machine";
   return entries.filter(e => e.productId===p.id && e.kind===kind).reduce((a,e)=>a+hoursOf(e),0);
 }
@@ -844,26 +856,28 @@ function renderDashboard(){
   const byP = Object.fromEntries(cols.map(([k]) => [k, all.filter(e => inRange(e.date, R[k]))]));
   // KPIs for the week
   const wk = byP.week;
-  const units = products().reduce((a,p)=>a+(metricFor(wk,p,"units")||0),0);
+  const stageTotal = st => products().reduce((a,p)=>a+(metricFor(wk,p,st)||0),0);
+  const started = stageTotal("started"), printed = stageTotal("printed"), units = stageTotal("finished");
   const lab = wk.filter(e=>e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0);
   const mac = wk.filter(e=>e.kind==="machine").reduce((a,e)=>a+hoursOf(e),0);
   const days = new Set(wk.map(e=>e.date)).size;
   $("#kpis").innerHTML = [
-    [fmtNum(units), "Units completed", `Week of ${parseYmd(R.week[0]).toLocaleDateString(undefined,{month:"short",day:"numeric"})}`],
-    [fmtH(lab), "Labor hours", days ? `${fmtH(lab/days)} per working day` : "No time logged"],
-    [units && lab ? fmtNum(units/lab,1) : "—", "Units per labor hour", "All steps, all products"],
-    [fmtH(mac), "Printer hours", "Print runs, any printer"]
+    [fmtNum(started), "Units started", `Week of ${parseYmd(R.week[0]).toLocaleDateString(undefined,{month:"short",day:"numeric"})}`],
+    [fmtNum(printed), "Units printed", mac ? `${fmtH(mac)} printer hours` : "No print runs logged"],
+    [fmtNum(units), "Units finished", units && lab ? `${fmtNum(units/lab,1)} per labor hour` : "Logged at Ship / Package"],
+    [fmtH(lab), "Labor hours", days ? `${fmtH(lab/days)} per working day` : "No time logged"]
   ].map(([v,l,s]) => `<div class="kpi"><span class="l">${l}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></div>`).join("");
   // matrix
-  const fmt = v => v==null ? "—" : dashMetric==="units" ? fmtNum(v) : fmtH(v);
-  const prods = products().filter(p => dashMetric!=="units" || p.completeStep);
+  const isUnits = !!UNIT_STAGES[dashMetric];
+  const fmt = v => v==null ? "—" : isUnits ? fmtNum(v) : fmtH(v);
+  const prods = products().filter(p => !isUnits || !p.overhead);
   const totals = Object.fromEntries(cols.map(([k]) => [k, 0]));
   let body = prods.map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td>` + cols.map(([k]) => { const v = metricFor(byP[k], p, dashMetric); totals[k] += v||0; return `<td class="n">${fmt(v)}</td>`; }).join("") + `</tr>`).join("");
   body += `<tr class="total"><td>Total</td>${cols.map(([k]) => `<td class="n">${fmt(totals[k])}</td>`).join("")}</tr>`;
   const label = (k) => { const [a,b]=R[k]; const A=parseYmd(a), B=parseYmd(b); const o={month:"short",day:"numeric"};
     return k==="day" ? A.toLocaleDateString(undefined,o) : k==="week" ? `${A.toLocaleDateString(undefined,o)}–${B.toLocaleDateString(undefined,o)}` : k==="month" ? A.toLocaleDateString(undefined,{month:"long"}) : k==="quarter" ? `Q${Math.floor(A.getMonth()/3)+1}` : String(A.getFullYear()); };
-  $("#volTable").innerHTML = `<thead><tr><th>${dashMetric==="units"?"Units completed":dashMetric==="labor"?"Labor hours":"Printer hours"}</th>${cols.map(([k,n]) => `<th class="n">${n}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${label(k)}</span></th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
-  renderChart(anchor, all);
+  $("#volTable").innerHTML = `<thead><tr><th>${isUnits?`Units ${UNIT_STAGES[dashMetric].toLowerCase()}`:dashMetric==="labor"?"Labor hours":"Printer hours"}</th>${cols.map(([k,n]) => `<th class="n">${n}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${label(k)}</span></th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+  renderChart(anchor, all, isUnits ? dashMetric : "finished");
   // distributors (year to date)
   const yr = byP.year, mo = byP.month;
   const volBy = (list) => { const m = {}; for (const e of list) { const p = prod(e.productId); if (!p || p.overhead || e.stepId !== p.steps[0]?.id) continue; for (const r of decodeSplits(e)) { if (!r.name) continue; ((m[r.name] ||= {})[p.id] ||= 0); m[r.name][p.id] += Number(r.qty) || 0; } } return m; };
@@ -880,10 +894,12 @@ function renderDashboard(){
     emps.map(n => { const es = wk.filter(e=>e.kind==="labor" && e.employee===n); const by={}; es.forEach(e=>{ const k=e.productId+"|"+e.stepId; by[k]=(by[k]||0)+hoursOf(e); }); const top=Object.entries(by).sort((a,b)=>b[1]-a[1])[0]; const [pid,sid]=top?top[0].split("|"):[];
       return `<tr><td>${esc(n)}</td><td class="n">${es.length}</td><td class="n">${fmtH(es.reduce((a,e)=>a+hoursOf(e),0))}</td><td class="note">${top?esc(`${prod(pid)?.name||pid} · ${step(pid,sid)?.name||sid}`):""}</td></tr>`; }).join("") + `</tbody>`;
 }
-function renderChart(anchor, all){
+function renderChart(anchor, all, stage){
   const days = Array.from({length:30}, (_,i) => ymd(addDays(anchor, i-29)));
-  const ps = products().filter(p => p.completeStep);
-  const data = days.map(d => ps.map(p => all.filter(e => e.date===d && e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0)));
+  const ps = products().filter(p => stageStep(p, stage));
+  const word = UNIT_STAGES[stage].toLowerCase();
+  $("#chartTitle").textContent = `${UNIT_STAGES[stage]} units, last 30 days`;
+  const data = days.map(d => ps.map(p => { const sid = stageStep(p, stage); return all.filter(e => e.date===d && e.productId===p.id && e.stepId===sid).reduce((a,e)=>a+(Number(e.qty)||0),0); }));
   const maxV = Math.max(0, ...data.map(r => r.reduce((a,b)=>a+b,0)));
   $("#legend").innerHTML = ps.map(p => `<span><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</span>`).join("");
   const W=720,H=240,L=40,Rr=8,T=10,B=26, iw=W-L-Rr, ih=H-T-B;
@@ -894,10 +910,10 @@ function renderChart(anchor, all){
   for (let v=0; v<=top; v+=(maxV?step:1)) g += `<line x1="${L}" x2="${W-Rr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`;
   data.forEach((row,i) => { let acc=0; row.forEach((v,j) => { if(!v) return; const y0=y(acc), y1=y(acc+v); acc+=v; g += `<rect x="${(L+i*bw+1.5).toFixed(1)}" y="${y1.toFixed(1)}" width="${(bw-3).toFixed(1)}" height="${Math.max(0,y0-y1).toFixed(1)}" fill="${colorVar(ps[j])}"><title>${days[i]} · ${esc(ps[j].name)}: ${v}</title></rect>`; }); });
   days.forEach((d,i) => { if (i%5===4 || i===29) g += `<text x="${(L+i*bw+bw/2).toFixed(1)}" y="${H-8}" text-anchor="middle">${parseYmd(d).toLocaleDateString(undefined,{month:"numeric",day:"numeric"})}</text>`; });
-  $("#chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Completed units per day for the last 30 days">${g}${maxV?"":`<text x="${L+iw/2}" y="${T+ih/2}" text-anchor="middle">No completed units in these 30 days</text>`}</svg>`;
+  $("#chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${UNIT_STAGES[stage]} units per day for the last 30 days">${g}${maxV?"":`<text x="${L+iw/2}" y="${T+ih/2}" text-anchor="middle">No ${word} units in these 30 days</text>`}</svg>`;
 }
 $("#dashDate").addEventListener("change", renderDashboard);
-$$("[data-metric]").forEach(b => b.addEventListener("click", () => { dashMetric=b.dataset.metric; $$("[data-metric]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); renderDashboard(); }));
+$$("[data-metric]").forEach(b => { b.setAttribute("aria-pressed", String(b.dataset.metric===dashMetric)); b.addEventListener("click", () => { dashMetric=b.dataset.metric; store.set("prt.metric", dashMetric); $$("[data-metric]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); renderDashboard(); }); });
 
 // ---------- time study ----------
 function rates(days, emp){
