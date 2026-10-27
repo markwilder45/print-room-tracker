@@ -126,6 +126,9 @@ tr.prodhead td{background:var(--chip);font:600 15px var(--display);letter-spacin
 .timer .el{font:600 20px var(--mono);font-variant-numeric:tabular-nums}
 .timer .act{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .timer .act input{width:110px}
+.timer.paused{background:var(--chip);border-left-style:dashed}
+.timer.paused .el{color:var(--muted)}
+.pill.paused{background:var(--warn-bg);color:var(--warn)}
 .empty{padding:18px;border:1px dashed var(--line);border-radius:var(--r);color:var(--muted);font-size:14px;text-align:center}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
 .chartbox{overflow-x:auto}
@@ -238,6 +241,9 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
             </label>
             <label class="f manual" hidden>End
               <input id="fEnd" type="time">
+            </label>
+            <label class="f manual pauseonly" hidden>Paused <span class="optional">(minutes)</span>
+              <input id="fPaused" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
             </label>
             <label class="f" style="grid-column:1/-1">Note
               <input id="fNote" type="text" maxlength="200" placeholder="Optional: order #, SKU, issue">
@@ -410,7 +416,9 @@ const fmtTime = ms => { const d = new Date(ms); let h = d.getHours(); const ap =
 const fmtNum = (n, dp=0) => (n==null||!isFinite(n)) ? "—" : n.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp});
 const fmtH = h => h==null ? "—" : (h < 10 ? fmtNum(h,1) : fmtNum(h,0));
 const fmtElapsed = ms => { const m = Math.max(0, Math.floor(ms/60000)); return `${Math.floor(m/60)}:${pad(m%60)}`; };
-const hoursOf = e => (e.end && e.start) ? Math.max(0, (e.end - e.start)/3.6e6) : 0;
+// Worked time = wall-clock span minus pauses.
+const hoursOf = e => (e.end && e.start) ? Math.max(0, (e.end - e.start - (Number(e.pausedMs) || 0))/3.6e6) : 0;
+const activeMs = (t, now = Date.now()) => Math.max(0, (now - t.start) - (Number(t.pausedMs) || 0) - (t.pausedAt ? now - t.pausedAt : 0));
 const store = { get(k){ try { return localStorage.getItem(k); } catch { return null; } }, set(k,v){ try { localStorage.setItem(k,v); } catch {} } };
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true, 2600); }
 function weekStart(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); const wd=(x.getDay()+6)%7; return addDays(x,-wd); }
@@ -433,7 +441,7 @@ const inRange = (s, [a,b]) => s >= a && s <= b;
 const API_URL = "https://script.google.com/macros/s/AKfycbwVt7yQSiENwHg9CTeqUeH4CqLVauW8ED1KFnFvoBMR5KwUfcIdVlVZrphJvbuuihWv/exec";
 let apiUrl = API_URL || store.get("prt.api") || "";
 let passKey = store.get("prt.key") || "";
-let online = false, canWrite = true, serverTime = 0, pollT = null;
+let online = false, canWrite = true, serverTime = 0, pollT = null, scriptVersion = 1;
 async function api(params, method){
   if (!apiUrl) throw new Error("The tracker isn't connected to its sheet yet.");
   let res;
@@ -490,7 +498,8 @@ async function connect(){
     const since = ymd(new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1));
     const d = await api({ action:"load", since });
     entries.clear(); d.entries.forEach(applyEntry);
-    applyConfig(d.config); serverTime = d.serverTime;
+    applyConfig(d.config); serverTime = d.serverTime; scriptVersion = Number(d.scriptVersion) || 1;
+    $$(".pauseonly").forEach(el => el.hidden = scriptVersion < 2 || mode !== "manual");
     online = true; hideStatus(); $("#gate").hidden = true; $("#app").hidden = false;
     renderAll(); startPolling();
   } catch(err) {
@@ -516,7 +525,7 @@ function startPolling(){ clearInterval(pollT); pollT = setInterval(poll, 20000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 function showStatus(msg, kind){ const s=$("#status"); s.textContent=msg; s.className="banner "+kind; s.hidden=false; }
 function hideStatus(){ $("#status").hidden = true; }
-function tickClock(){ const d=new Date(); $("#clock").textContent = d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}) + " · " + fmtTime(+d); $$(".el[data-start]").forEach(el => el.textContent = fmtElapsed(Date.now() - Number(el.dataset.start))); }
+function tickClock(){ const d=new Date(); $("#clock").textContent = d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}) + " · " + fmtTime(+d); $$(".el[data-tid]").forEach(el => { const t = entries.get(el.dataset.tid); if (t) el.textContent = fmtElapsed(activeMs(t)); }); }
 let rT=null; function scheduleRender(){ clearTimeout(rT); rT=setTimeout(renderAll, 60); }
 
 // ---------- tabs ----------
@@ -609,7 +618,7 @@ $("#fEmp").addEventListener("change", () => store.set("prt.emp", $("#fEmp").valu
 
 function setMode(m){ mode=m;
   $("#modeLive").setAttribute("aria-pressed", String(m==="live")); $("#modeManual").setAttribute("aria-pressed", String(m==="manual"));
-  $$(".manual").forEach(el => el.hidden = m!=="manual");
+  $$(".manual").forEach(el => el.hidden = m!=="manual" || (el.classList.contains("pauseonly") && scriptVersion < 2));
   $("#btnStart").hidden = m!=="live"; $("#btnSave").hidden = m!=="manual";
   $("#formTitle").textContent = editing ? "Edit entry" : (m==="live" ? "Start a task" : "Log past work");
   $("#overlapWarn").hidden = true; }
@@ -641,10 +650,10 @@ $("#btnStart").addEventListener("click", async () => {
   if (!f.productId || !f.stepId) return formMsg("Choose a product and step.", true);
   if (f.kind === "machine" && !f.printer) return formMsg("Add a printer in Setup first.", true);
   if (formSplits.length > 1 && formSplits.some(r => !r.name)) return formMsg("Choose a distributor on every split line, or remove the empty one.", true);
-  const clash = f.kind==="labor" ? openTimers().find(t => t.kind==="labor" && t.employee===f.employee) : null;
+  const clash = f.kind==="labor" ? openTimers().find(t => t.kind==="labor" && !t.pausedAt && t.employee===f.employee) : null;
   if (clash && !$("#overlapWarn").dataset.ok) {
     const w=$("#overlapWarn");
-    w.innerHTML = `${esc(f.employee)} already has <b>${esc(prod(clash.productId)?.name)} · ${esc(step(clash.productId, clash.stepId)?.name)}</b> running. One person can only have one hands-on task open. Print runs don't count. <div class="row" style="margin-top:8px"><button class="b small" type="button" id="ovStop">Stop that one in Running now</button><button class="b small" type="button" id="ovAnyway">Start anyway</button></div>`;
+    w.innerHTML = `${esc(f.employee)} already has <b>${esc(prod(clash.productId)?.name)} · ${esc(step(clash.productId, clash.stepId)?.name)}</b> running. One person can only have one hands-on task running at a time. Paused tasks and print runs don't count. <div class="row" style="margin-top:8px"><button class="b small" type="button" id="ovStop">Go to that timer</button><button class="b small" type="button" id="ovAnyway">Start anyway</button></div>`;
     w.hidden=false;
     $("#ovStop").onclick = () => { w.hidden=true; document.querySelector(`[data-timer="${clash.id}"] input`)?.focus(); };
     $("#ovAnyway").onclick = () => { w.dataset.ok="1"; $("#btnStart").click(); };
@@ -668,15 +677,17 @@ $("#btnSave").addEventListener("click", async () => {
   if (!date || !st || !en) return formMsg("Enter the date, start and end times.", true);
   let start = timeToMs(date, st), end = timeToMs(date, en);
   if (end <= start) end += 86400000; // ran past midnight
+  const pausedMs = scriptVersion >= 2 ? Math.max(0, Number($("#fPaused").value) || 0) * 60000 : 0;
+  if (pausedMs >= end - start) return formMsg("Paused time is as long as the whole span. Check the start, end and paused minutes.", true);
   if (formSplits.length > 1 && formSplits.some(r => !r.name)) return formMsg("Choose a distributor on every split line, or remove the empty one.", true);
   if (isFirstStep(f.productId, f.stepId) && distRequired(prod(f.productId)) && !namedSplits(formSplits).length) return formMsg(`Add at least one distributor. ${prod(f.productId)?.steps[0]?.name || "The first step"} is where distributors are logged.`, true);
   if (f.qty == null && !prod(f.productId)?.overhead) return formMsg("Enter how many units were done.", true);
   try {
     const old = editing ? entries.get(editing.id) : null;
-    const entry = { ...f, date, start, end, createdAt: old?.createdAt || Date.now(), editedAt: editing ? Date.now() : null };
+    const entry = { ...f, date, start, end, pausedMs, pausedAt: null, createdAt: old?.createdAt || Date.now(), editedAt: editing ? Date.now() : null };
     await writeEntry(entry, editing?.id);
     toast(editing ? "Entry updated" : "Entry saved");
-    endEdit(); $("#fQty").value=""; $("#fNote").value=""; formMsg("");
+    endEdit(); $("#fQty").value=""; $("#fNote").value=""; $("#fPaused").value=""; formMsg("");
     formSplits = defaultSplits(prod(f.productId)); renderFormSplits();
   } catch(err) { formMsg("Couldn't save: " + err.message, true); }
 });
@@ -691,6 +702,7 @@ function beginEdit(e){
   if (e.printer) $("#fPrinter").value = e.printer;
   $("#fDate").value = e.date; const s=new Date(e.start), en=new Date(e.end);
   $("#fStart").value = `${pad(s.getHours())}:${pad(s.getMinutes())}`; $("#fEnd").value = `${pad(en.getHours())}:${pad(en.getMinutes())}`;
+  $("#fPaused").value = e.pausedMs ? Math.round(e.pausedMs / 60000) : "";
   setMode("manual"); $("#btnCancelEdit").hidden=false; $("#formTitle").textContent="Edit entry";
   $("#entryCard").scrollIntoView({behavior:"smooth", block:"start"});
 }
@@ -702,23 +714,46 @@ function renderTimers(fresh){
   for (const [id,v] of Object.entries(typed)) { const el=document.getElementById(id); if (el && document.activeElement !== el) el.value = v; }
   if (focusId && (focusId.startsWith("q-") || focusId.startsWith("sp-"))) document.getElementById(focusId)?.focus();
 }
+const armedResume = new Set();
 function paintTimers(){
   const list = openTimers();
-  $("#runCount").textContent = list.length ? `${list.length} open` : "";
+  const nPaused = list.filter(t => t.pausedAt).length;
+  $("#runCount").textContent = list.length ? `${list.length} open${nPaused ? ` · ${nPaused} paused` : ""}` : "";
   if (!list.length) { $("#timers").innerHTML = `<div class="empty">No timers running. Start one when a step begins; print runs can run alongside hands-on work.</div>`; return; }
   $("#timers").innerHTML = list.map(t => {
     const p=prod(t.productId), s=step(t.productId,t.stepId), machine=t.kind==="machine";
-    return `<div class="timer" data-timer="${esc(t.id)}" style="border-left-color:${colorVar(p)}">
+    const paused = !!t.pausedAt;
+    return `<div class="timer${paused ? " paused" : ""}" data-timer="${esc(t.id)}" style="border-left-color:${colorVar(p)}">
       <div><div class="who">${machine ? esc(t.printer||"Printer") + ` <span class="pill machine">print run</span>` : esc(t.employee)}</div>
-      <div class="what">${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)} · since ${fmtTime(t.start)}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}</div></div>
-      <div class="el" data-start="${t.start}">${fmtElapsed(Date.now()-t.start)}</div>
+      <div class="what">${paused ? `<span class="pill paused">Paused since ${fmtTime(t.pausedAt)}</span> ` : ""}${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)} · since ${fmtTime(t.start)}${t.pausedMs ? ` · ${fmtElapsed(t.pausedMs)} paused` : ""}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}</div></div>
+      <div class="el" data-tid="${esc(t.id)}" title="Worked time (pauses not counted)">${fmtElapsed(activeMs(t))}</div>
       ${p && !p.overhead && isFirstStep(t.productId, t.stepId) ? splitEditorHTML(t.id, timerRows(t)) : ""}
       <div class="act">${timerRows(t).length > 1 ? `<span class="splittotal">${fmtNum(splitTotal(timerRows(t)))} units total</span>` : `<input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">`}
+        <button class="b small" type="button" data-pause="${esc(t.id)}">${paused ? (armedResume.has(t.id) ? "Resume anyway?" : "Resume") : "Pause"}</button>
         <button class="b primary small" type="button" data-stop="${esc(t.id)}">Stop &amp; save</button>
         <button class="link" type="button" data-discard="${esc(t.id)}">Discard</button></div></div>`;
   }).join("");
 }
 $("#timers").addEventListener("click", async ev => {
+  const pauseId = ev.target.dataset.pause;
+  if (pauseId) {
+    if (!guardWrite()) return;
+    if (scriptVersion < 2) { toast("Pausing needs the updated sheet script. Ask the tracker owner to redeploy it."); return; }
+    const t = openTimers().find(x => x.id === pauseId); if (!t) return;
+    const resuming = !!t.pausedAt, at = Date.now();
+    if (resuming && t.kind === "labor") {
+      const other = openTimers().find(x => x.id !== t.id && x.kind === "labor" && !x.pausedAt && x.employee === t.employee);
+      if (other && !armedResume.has(t.id)) { armedResume.add(t.id); ev.target.textContent = "Resume anyway?"; toast(`${t.employee} has another task running. Pause or stop it first, or tap again to resume both.`); setTimeout(() => { armedResume.delete(t.id); const b = document.querySelector(`[data-pause="${CSS.escape(t.id)}"]`); if (b && b.textContent === "Resume anyway?") b.textContent = "Resume"; }, 6000); return; }
+      armedResume.delete(t.id);
+    }
+    ev.target.disabled = true;
+    // show the change right away; the sheet's answer replaces it
+    entries.set(t.id, resuming ? { ...t, pausedMs: (Number(t.pausedMs)||0) + (at - t.pausedAt), pausedAt: null } : { ...t, pausedAt: at });
+    renderTimers();
+    try { applyEntry((await api({ action: resuming ? "resume" : "pause", id: t.id, at }, "POST")).entry); renderTimers(); toast(resuming ? "Resumed" : "Paused"); }
+    catch(err){ entries.set(t.id, t); renderTimers(); toast("Couldn't " + (resuming ? "resume" : "pause") + ": " + err.message); }
+    return;
+  }
   const stopId = ev.target.dataset.stop, discId = ev.target.dataset.discard;
   if (!stopId && !discId) return;
   if (!guardWrite()) return;
@@ -804,7 +839,7 @@ function renderLog(){
   if (!rows.length) { $("#logTable").innerHTML = `<tbody><tr><td><div class="empty">Nothing finished on this day yet. Stopped timers and past-time entries show up here.</div></td></tr></tbody>`; $("#logSummary").textContent=""; return; }
   $("#logTable").innerHTML = `<thead><tr><th>Time</th><th>Who</th><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Min</th><th class="n">Units/hr</th><th>Detail</th><th></th></tr></thead><tbody>` +
     rows.map(e => { const p=prod(e.productId), s=step(e.productId,e.stepId), h=hoursOf(e), rate = e.qty && h ? e.qty/h : null;
-      return `<tr><td class="mono">${fmtTime(e.start)}–${fmtTime(e.end)}</td>
+      return `<tr><td class="mono">${fmtTime(e.start)}–${fmtTime(e.end)}${e.pausedMs ? `<br><span class="note">${fmtElapsed(e.pausedMs)} paused</span>` : ""}</td>
       <td>${e.kind==="machine" ? `<span class="pill machine">${esc(e.printer||"printer")}</span>` : esc(e.employee)}</td>
       <td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p?.name||e.productId)}</td>
       <td>${esc(s?.name||e.stepId)}</td><td class="n">${fmtNum(e.qty)}</td><td class="n">${fmtNum(h*60)}</td><td class="n">${rate?fmtNum(rate,1):"—"}</td>
@@ -827,8 +862,8 @@ $("#logEmp").addEventListener("change", renderLog);
 $("#btnExport").addEventListener("click", async () => {
   const rows = finished().sort((a,b)=>a.start-b.start);
   const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
-  const lines = [["Date","Start","End","Minutes","Employee","Product","Step","Kind","Units","Distributor","Printer","Note"].join(",")]
-    .concat(rows.map(e => [e.date, new Date(e.start).toLocaleTimeString(), new Date(e.end).toLocaleTimeString(), (hoursOf(e)*60).toFixed(1), e.employee, prod(e.productId)?.name||e.productId, step(e.productId,e.stepId)?.name||e.stepId, e.kind, e.qty ?? "", e.distributor, e.printer, e.note].map(q).join(",")));
+  const lines = [["Date","Start","End","Minutes worked","Minutes paused","Employee","Product","Step","Kind","Units","Distributor","Printer","Note"].join(",")]
+    .concat(rows.map(e => [e.date, new Date(e.start).toLocaleTimeString(), new Date(e.end).toLocaleTimeString(), (hoursOf(e)*60).toFixed(1), ((Number(e.pausedMs)||0)/60000).toFixed(1), e.employee, prod(e.productId)?.name||e.productId, step(e.productId,e.stepId)?.name||e.stepId, e.kind, e.qty ?? "", e.distributor, e.printer, e.note].map(q).join(",")));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type:"text/csv" }));
   a.download = `print-room-log-${todayStr()}.csv`; document.body.appendChild(a); a.click();

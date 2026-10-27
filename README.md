@@ -23,8 +23,15 @@ in the copy of `Code.gs` inside the Google Sheet. The copy in this repo says `CH
 3. Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy.
    The web app URL stays the same.
 
+## Updating the script
+
+When a new `Code.gs` comes along, paste it over the old one in Extensions → Apps Script, put your passcode
+back on the `PASSCODE` line, save, then Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy.
+The web app URL stays the same.
+
 ## Raw data
 
 The `Entries` tab has one row per task: date, start, end (epoch ms plus readable times), minutes, employee,
-product, step, labor or printer time, units, distributor, printer and note. Deleted entries stay as rows
+product, step, labor or printer time, units, distributor, printer and note. `minutes` is worked time:
+the span from start to end minus `pausedMs` (time the timer sat paused). `pausedAt` is filled in only while a timer is paused. Deleted entries stay as rows
 with `deleted = TRUE` so every device can sync the deletion. Don't edit the `id` or `updatedAt` columns by hand.
