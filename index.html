@@ -336,7 +336,25 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
             <button type="button" data-period="week" aria-pressed="true">Week</button>
             <button type="button" data-period="month" aria-pressed="false">Month</button>
           </div>
+          <label class="f">Report for<input id="fcDate" type="date"></label>
           <button class="b" id="btnFillAvg" type="button">Fill from last 4 weeks</button>
+          <button class="b primary" id="btnEmail" type="button">Email day report</button>
+        </div>
+      </div>
+      <div class="card" id="emailPanel" hidden>
+        <div class="head">
+          <div><h3 style="color:var(--ink)" id="emailTitle">Email the forecast</h3><p class="sub" id="emailSub"></p></div>
+        </div>
+        <div class="chips" id="emailTo"></div>
+        <div class="fields">
+          <label class="f">Sent by<select id="emailBy"></select></label>
+          <label class="f" style="grid-column:1/-1">Note <span class="optional">(optional, goes at the top of the email)</span><textarea id="emailNote" rows="2" maxlength="500" placeholder="e.g. Rush Grove order due Thursday"></textarea></label>
+        </div>
+        <div id="emailWarn" class="banner warn" hidden></div>
+        <div class="row">
+          <button class="b primary" id="btnSendEmail" type="button">Send report</button>
+          <button class="b" id="btnCancelEmail" type="button">Cancel</button>
+          <span class="note" id="emailMsg"></span>
         </div>
       </div>
       <div class="grid2">
@@ -345,7 +363,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
           <div class="tablewrap"><table id="fcInputs"></table></div>
         </div>
         <div class="section">
-          <h3>What it takes</h3>
+          <div class="head"><h3>What it takes</h3><span class="note" id="fcLastSent"></span></div>
           <div id="fcSummary" class="section"></div>
         </div>
       </div>
@@ -380,6 +398,12 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
           <h3>Printers</h3>
           <div id="printerRows" class="section"></div>
           <div class="row"><button class="b" type="button" id="addPrinter">Add printer</button></div>
+        </div>
+        <div class="card">
+          <h3>Forecast email list</h3>
+          <div class="chips" id="mailChips"></div>
+          <div class="row"><input id="newMail" type="email" placeholder="name@example.com" style="flex:1" autocomplete="off"><button class="b" type="button" id="addMail">Add</button></div>
+          <p class="note" id="mailNote">Everyone here gets the report when someone presses Email report on the Forecast tab. It's sent from the Google account that owns the tracker's sheet.</p>
         </div>
         <div class="card">
           <h3>Staffing assumptions</h3>
@@ -1044,7 +1068,68 @@ function renderForecastOut(){
 }
 $("#fcInputs").addEventListener("input", ev => { const id=ev.target.dataset.fc; if (!id) return; fcPlan[id] = ev.target.value===""?"":Number(ev.target.value); renderForecastOut(); });
 $("#btnFillAvg").addEventListener("click", () => { for (const p of products()) if (!p.overhead) fcPlan[p.id] = Math.round(avgVolume(p)); renderForecast(); });
-$$("[data-period]").forEach(b => b.addEventListener("click", () => { fcPeriod=b.dataset.period; $$("[data-period]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); renderForecast(); }));
+$$("[data-period]").forEach(b => b.addEventListener("click", () => { fcPeriod=b.dataset.period; $$("[data-period]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); syncEmailButton(); renderForecast(); if (!$("#emailPanel").hidden) openEmailPanel(); }));
+
+// ---- emailed report ----
+$("#fcDate").value = todayStr();
+function reportLabel(){
+  const d = parseYmd($("#fcDate").value || todayStr());
+  if (fcPeriod === "day") return d.toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric" });
+  if (fcPeriod === "week") return "Week of " + weekStart(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+  return d.toLocaleDateString("en-US", { month:"long", year:"numeric" });
+}
+function syncEmailButton(){ $("#btnEmail").textContent = `Email ${fcPeriod} report`; }
+function buildReport(){
+  const f = computeForecast(), hpp = config?.productiveHoursPerPerson || 6.5;
+  const cap = (config?.printers||[]).reduce((a,p)=>a+(Number(p.hoursPerDay)||0),0) * f.D;
+  const pageUrl = /github\.io$/.test(location.hostname) ? location.origin + location.pathname : "";
+  return {
+    period: fcPeriod, label: reportLabel(),
+    laborHours: f.labor, peopleNeeded: f.labor / (hpp * f.D), printerHours: f.printer, printerCapacity: cap,
+    hoursPerPerson: hpp, missingSteps: f.missing,
+    products: products().filter(p => !p.overhead && Number(fcPlan[p.id])).map(p => ({ name: p.name, units: Number(fcPlan[p.id]) })),
+    steps: f.lines.filter(l => l.hours).map(l => ({ product: l.p.name, step: l.s.name, units: l.units, hours: l.hours, printer: l.s.kind === "machine" })),
+    sentBy: $("#emailBy").value || "", note: $("#emailNote").value.trim(), pageUrl
+  };
+}
+function openEmailPanel(){
+  const list = config?.reportEmails || [], units = Object.values(fcPlan).reduce((a,v)=>a+(Number(v)||0),0);
+  const f = computeForecast();
+  $("#emailTitle").textContent = `Email the ${fcPeriod} forecast for ${reportLabel()}`;
+  $("#emailSub").textContent = list.length ? `${fmtH(f.labor)} labor hours · ${fmtNum(units)} planned units · goes to ${list.length} ${list.length>1?"people":"person"}:` : "";
+  $("#emailTo").innerHTML = list.map(e => `<span class="chipx" style="padding-right:10px">${esc(e)}</span>`).join("");
+  const emps = config?.employees || [], cur = $("#emailBy").value || store.get("prt.emp") || "";
+  $("#emailBy").innerHTML = opt("", "—") + emps.map(n => opt(n, n, n === cur)).join("");
+  let warn = "";
+  if (scriptVersion < 3) warn = "Emailing needs the updated sheet script. Ask the tracker owner to redeploy it.";
+  else if (!list.length) warn = "No one is on the email list yet. Add addresses on the Setup tab under Forecast email list.";
+  else if (!units) warn = "Enter planned units first. The report would show only overhead hours.";
+  $("#emailWarn").textContent = warn; $("#emailWarn").hidden = !warn;
+  $("#btnSendEmail").disabled = !!warn && (scriptVersion < 3 || !list.length);
+  $("#emailMsg").textContent = ""; $("#emailMsg").style.color = "";
+  $("#emailPanel").hidden = false;
+}
+$("#btnEmail").addEventListener("click", () => { openEmailPanel(); $("#emailPanel").scrollIntoView({ behavior:"smooth", block:"nearest" }); });
+$("#btnCancelEmail").addEventListener("click", () => { $("#emailPanel").hidden = true; });
+$("#fcDate").addEventListener("change", () => { if (!$("#emailPanel").hidden) openEmailPanel(); });
+$("#btnSendEmail").addEventListener("click", async () => {
+  if (!online) { $("#emailMsg").textContent = "Not connected to the sheet. Reload the page."; return; }
+  const units = Object.values(fcPlan).reduce((a,v)=>a+(Number(v)||0),0);
+  const btn = $("#btnSendEmail");
+  if (!units && !btn.dataset.armed) { btn.dataset.armed = "1"; btn.textContent = "Send anyway"; return; }
+  delete btn.dataset.armed;
+  btn.disabled = true; btn.textContent = "Sending…"; $("#emailMsg").textContent = "";
+  try {
+    const d = await api({ action: "emailReport", report: buildReport() }, "POST");
+    $("#emailPanel").hidden = true; $("#emailNote").value = "";
+    toast(`Report sent to ${d.sentTo} ${d.sentTo>1?"people":"person"}`);
+    $("#fcLastSent").textContent = `Last report sent ${fmtTime(Date.now())} for ${reportLabel()}`;
+  } catch(err) {
+    $("#emailMsg").textContent = "Not sent: " + err.message; $("#emailMsg").style.color = "var(--bad)";
+  } finally { btn.disabled = false; btn.textContent = "Send report"; }
+});
+$("#emailBy").addEventListener("change", () => { if ($("#emailBy").value) store.set("prt.emp", $("#emailBy").value); });
+syncEmailButton();
 
 // ---------- setup ----------
 let setupDirty = false;
@@ -1054,6 +1139,8 @@ function renderSetup(){
   $("#empChips").innerHTML = draft.employees.length ? draft.employees.map((n,i)=>`<span class="chipx">${esc(n)}<button type="button" aria-label="Remove ${esc(n)}" data-rm-emp="${i}">×</button></span>`).join("") : `<span class="note">No employees yet.</span>`;
   $("#distChips").innerHTML = draft.distributors.map((n,i)=>`<span class="chipx">${esc(n)}<button type="button" aria-label="Remove ${esc(n)}" data-rm-dist="${i}">×</button></span>`).join("");
   $("#printerRows").innerHTML = draft.printers.map((p,i)=>`<div class="row"><label class="f" style="flex:2">Name<input type="text" id="pr-n-${i}" data-pr="${i}" data-k="name" value="${esc(p.name)}"></label><label class="f" style="flex:1">Hours / day<input type="number" min="0" max="24" step="0.5" id="pr-h-${i}" data-pr="${i}" data-k="hoursPerDay" value="${p.hoursPerDay}"></label><button class="link" type="button" data-rm-pr="${i}" style="color:var(--bad);padding-bottom:10px">Remove</button></div>`).join("");
+  const mails = draft.reportEmails || [];
+  $("#mailChips").innerHTML = mails.length ? mails.map((n,i)=>`<span class="chipx">${esc(n)}<button type="button" aria-label="Remove ${esc(n)}" data-rm-mail="${i}">×</button></span>`).join("") : `<span class="note">No one yet.</span>`;
   $("#setHrs").value = draft.productiveHoursPerPerson; $("#setDays").value = draft.workdaysPerWeek;
   if (!renderSetup.opened && draft.products[0]) { openProducts.add(draft.products[0].id); renderSetup.opened = true; }
   $("#prodEditor").innerHTML = draft.products.map((p,pi) => `<details data-prod="${esc(p.id)}" ${openProducts.has(p.id)?"open":""}><summary><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)} <span class="note">· ${p.steps.length} steps</span></summary>
@@ -1132,6 +1219,7 @@ $("#view-setup").addEventListener("click", ev => {
   const d = ev.target.dataset; if (!draft) return;
   if (d.rmEmp != null) { draft.employees.splice(+d.rmEmp,1); }
   else if (d.rmDist != null) { draft.distributors.splice(+d.rmDist,1); }
+  else if (d.rmMail != null) { (draft.reportEmails ||= []).splice(+d.rmMail,1); }
   else if (d.rmPr != null) { draft.printers.splice(+d.rmPr,1); }
   else if (d.move) { const [pi,si,dir]=d.move.split("|").map(Number); moveStep(pi, si, si+dir, dir<0?'.mv[data-move$="|-1"]':'.mv[data-move$="|1"]'); return; }
   else if (d.rmStep) { const [pi,si]=d.rmStep.split("|").map(Number); draft.products[pi].steps.splice(si,1); }
@@ -1143,6 +1231,22 @@ $("#view-setup").addEventListener("click", ev => {
 function addFromInput(inputId, listKey){ const v=$(inputId).value.replace(/[|×]/g," ").replace(/\s+/g," ").trim(); if (!v || !draft) return; if (!draft[listKey].includes(v)) draft[listKey].push(v); $(inputId).value=""; markDirty(); renderSetup(); }
 $("#addEmp").addEventListener("click", () => addFromInput("#newEmp","employees"));
 $("#addDist").addEventListener("click", () => addFromInput("#newDist","distributors"));
+const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
+function addMail(){
+  if (!draft) return;
+  const list = (draft.reportEmails ||= []);
+  // allow pasting several at once, separated by commas, semicolons or spaces
+  const raw = $("#newMail").value.split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+  const bad = raw.filter(x => !EMAIL_RE.test(x));
+  raw.forEach(x => { if (EMAIL_RE.test(x) && !list.includes(x)) list.push(x); });
+  if (list.length > 25) list.length = 25;
+  $("#newMail").value = bad.join(", ");
+  $("#mailNote").style.color = bad.length ? "var(--bad)" : "";
+  $("#mailNote").textContent = bad.length ? `${bad.length > 1 ? "These don't" : "This doesn't"} look like an email address: ${bad.join(", ")}` : "Everyone here gets the report when someone presses Email report on the Forecast tab. It's sent from the Google account that owns the tracker's sheet.";
+  markDirty(); renderSetup();
+}
+$("#addMail").addEventListener("click", addMail);
+$("#newMail").addEventListener("keydown", e => { if (e.key==="Enter") { e.preventDefault(); addMail(); } });
 $("#newEmp").addEventListener("keydown", e => { if (e.key==="Enter") { e.preventDefault(); addFromInput("#newEmp","employees"); } });
 $("#newDist").addEventListener("keydown", e => { if (e.key==="Enter") { e.preventDefault(); addFromInput("#newDist","distributors"); } });
 $("#btnSaveSetup").addEventListener("click", async () => {

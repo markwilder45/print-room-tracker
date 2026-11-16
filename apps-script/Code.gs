@@ -11,7 +11,9 @@
  */
 
 const PASSCODE = 'CHANGE-ME';   // change here to rotate; redeploy after changing
-const SCRIPT_VERSION = 2;           // 2 = pause / resume
+const SCRIPT_VERSION = 3;           // 2 = pause / resume, 3 = emailed forecast reports
+const MAX_RECIPIENTS = 25;          // per report
+const MAX_REPORTS_PER_DAY = 20;     // guards the Gmail sending quota
 const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt'];
 const SEED_CONFIG = {"version": 1, "employees": [], "distributors": ["Grove", "Amazon FBA", "Direct / Retail"], "printers": [{"name": "Printer 1", "hoursPerDay": 8}], "productiveHoursPerPerson": 6.5, "workdaysPerWeek": 5, "products": [{"id": "poster", "name": "Posters", "color": 0, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 45, "share": 1}, {"id": "roll", "name": "Rolling", "kind": "labor", "est": 30, "share": 1}, {"id": "tube", "name": "Tubing", "kind": "labor", "est": 40, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "vinyl", "name": "Vinyl / Decals", "color": 1, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 45, "share": 1}, {"id": "weed", "name": "Weeding (peel excess)", "kind": "labor", "est": 20, "share": 1}, {"id": "roll", "name": "Rolling", "kind": "labor", "est": 30, "share": 1}, {"id": "tube", "name": "Tubing", "kind": "labor", "est": 40, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "canvas", "name": "Canvas", "color": 2, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 45, "share": 1}, {"id": "frames", "name": "Cut / build frames", "kind": "labor", "est": 10, "share": 1}, {"id": "stretch", "name": "Stretch canvas", "kind": "labor", "est": 20, "share": 1}, {"id": "foam", "name": "Foam canvases", "kind": "labor", "est": 90, "share": 1}, {"id": "boxes", "name": "Build boxes", "kind": "labor", "est": 6, "share": 1}, {"id": "pack", "name": "Package canvas (box already built)", "kind": "labor", "est": 50, "share": 1}, {"id": "ship", "name": "Ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "wrap_single", "name": "Wrapping Paper \u2013 Singles", "color": 3, "completeStep": "ship", "askDistributor": true, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 42, "share": 1}, {"id": "rolltube", "name": "Roll & tube", "kind": "labor", "est": 24, "share": 1}, {"id": "sticker", "name": "Sticker", "kind": "labor", "est": null, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "wrap_bulk", "name": "Wrapping Paper \u2013 Bulk", "color": 4, "completeStep": "ship", "askDistributor": true, "defaultDistributor": "Grove", "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 42, "share": 1}, {"id": "rolltube", "name": "Roll & tube", "kind": "labor", "est": 24, "share": 1}, {"id": "sticker", "name": "Sticker", "kind": "labor", "est": null, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "ribbon", "name": "Ribbons", "color": 5, "completeStep": "package", "askDistributor": true, "defaultDistributor": "Grove", "steps": [{"id": "upc", "name": "UPC sticker", "kind": "labor", "est": null, "share": 1}, {"id": "package", "name": "Package", "kind": "labor", "est": null, "share": 1}]}, {"id": "photo", "name": "Photos (ScanCafe prints)", "color": 6, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "pack", "name": "Pack", "kind": "labor", "est": null, "share": 1}, {"id": "ship", "name": "Ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "general", "name": "General / overhead", "color": 7, "overhead": true, "completeStep": null, "askDistributor": false, "steps": [{"id": "maint", "name": "Machine maintenance", "kind": "labor", "perDay": 0.5}, {"id": "clean", "name": "Work space clean up", "kind": "labor", "perDay": 0.3}]}]};
 
@@ -34,6 +36,7 @@ function handle_(req) {
       case 'pause':      return json_(withLock_(() => pause_(req.id, Number(req.at))));
       case 'resume':     return json_(withLock_(() => resume_(req.id, Number(req.at))));
       case 'saveConfig': return json_(withLock_(() => saveConfig_(req.config)));
+      case 'emailReport': return json_(withLock_(() => emailReport_(req.report)));
       case 'ping':       return json_({ ok: true, serverTime: Date.now(), scriptVersion: SCRIPT_VERSION });
       default:           return json_({ ok: false, error: 'Unknown action' });
     }
@@ -172,6 +175,85 @@ function resume_(id, at) {
   if (!e.pausedAt) return { ok: true, entry: e };      // not paused
   return patch_(id, { pausedMs: e.pausedMs + Math.max(0, (at || Date.now()) - e.pausedAt), pausedAt: null });
 }
+
+// ---------- emailed forecast report ----------
+const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
+function esc_(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+function num_(v, dp) { const n = Number(v); if (!isFinite(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0 }); }
+function hrs_(v) { return num_(Number(v) || 0, 1); }
+function str_(v, max) { return String(v == null ? '' : v).slice(0, max || 120); }
+
+function emailReport_(r) {
+  if (!r || typeof r !== 'object') throw new Error('The report was empty.');
+  // recipients come only from the saved setup, never from the request
+  const cfg = getConfig_().config || {};
+  const to = (cfg.reportEmails || []).map(e => String(e).trim().toLowerCase()).filter(e => EMAIL_RE.test(e));
+  const list = [...new Set(to)].slice(0, MAX_RECIPIENTS);
+  if (!list.length) throw new Error('No one is on the mailing list yet. Add addresses on the Setup tab.');
+
+  const props = PropertiesService.getScriptProperties();
+  const dayKey = 'reports-' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const sentToday = Number(props.getProperty(dayKey)) || 0;
+  if (sentToday >= MAX_REPORTS_PER_DAY) throw new Error('The daily limit of ' + MAX_REPORTS_PER_DAY + ' reports has been reached. Try again tomorrow.');
+  if (MailApp.getRemainingDailyQuota() < list.length) throw new Error('Gmail\'s daily sending limit is used up. Try again tomorrow.');
+
+  const period = ['day','week','month'].indexOf(r.period) >= 0 ? r.period : 'day';
+  const label = str_(r.label, 60);
+  const products = (Array.isArray(r.products) ? r.products : []).slice(0, 30).map(p => ({ name: str_(p.name, 60), units: Number(p.units) || 0 })).filter(p => p.units > 0);
+  const steps = (Array.isArray(r.steps) ? r.steps : []).slice(0, 120).map(x => ({ product: str_(x.product, 60), step: str_(x.step, 80), units: x.units == null ? null : Number(x.units), hours: Number(x.hours) || 0, printer: !!x.printer }));
+  const labor = Number(r.laborHours) || 0, people = Number(r.peopleNeeded) || 0, printer = Number(r.printerHours) || 0, cap = Number(r.printerCapacity) || 0;
+  const hpp = Number(r.hoursPerPerson) || 0, missing = Number(r.missingSteps) || 0;
+  const sentBy = str_(r.sentBy, 60), note = str_(r.note, 500), pageUrl = /^https:\/\/[a-z0-9.-]+\.github\.io\//i.test(String(r.pageUrl || '')) ? String(r.pageUrl).slice(0, 200) : '';
+
+  const subject = 'Print room forecast, ' + label + ': ' + hrs_(labor) + ' labor hours';
+  const ink = '#132029', muted = '#5a6873', line = '#d6dee5', accent = '#0b6f93', bad = '#b0281f';
+  const tile = (v, l, s) => '<td style="padding:10px 14px;border-left:3px solid ' + accent + ';vertical-align:top"><div style="font:600 11px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + '">' + l + '</div><div style="font:700 26px Arial,sans-serif;color:' + ink + '">' + v + '</div><div style="font:12px Arial,sans-serif;color:' + muted + '">' + s + '</div></td>';
+  const th = t => '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid ' + line + ';font:600 11px Arial,sans-serif;letter-spacing:.05em;text-transform:uppercase;color:' + muted + '">' + t + '</th>';
+  const thn = t => th(t).replace('text-align:left', 'text-align:right');
+  const td = t => '<td style="padding:6px 8px;border-bottom:1px solid ' + line + ';font:14px Arial,sans-serif;color:' + ink + '">' + t + '</td>';
+  const tdn = t => td(t).replace('font:14px', 'text-align:right;font:13px Consolas,Menlo,monospace;font-size:13px');
+
+  let html = '<div style="max-width:640px;font-family:Arial,sans-serif;color:' + ink + '">';
+  html += '<div style="background:#132a38;color:#e9f1f6;padding:14px 18px;font:700 18px Arial,sans-serif;letter-spacing:.03em;text-transform:uppercase">Print room forecast</div>';
+  html += '<p style="font:15px Arial,sans-serif;margin:16px 0 4px"><b>' + esc_(label) + '</b>' + (sentBy ? ' · sent by ' + esc_(sentBy) : '') + '</p>';
+  if (note) html += '<p style="font:14px Arial,sans-serif;margin:8px 0;padding:10px 12px;background:#eef2f5;border-radius:4px">' + esc_(note).replace(/\n/g, '<br>') + '</p>';
+  html += '<table role="presentation" cellspacing="0" cellpadding="0" style="margin:14px 0;border-collapse:collapse"><tr>' +
+    tile(hrs_(labor), 'Labor hours', 'incl. overhead') +
+    tile(num_(people, 1), 'People needed', hpp ? 'at ' + num_(hpp, 2).replace(/\.?0+$/, '') + ' productive hrs each' : '') +
+    tile(printer ? hrs_(printer) : '—', 'Printer hours', cap ? 'of ' + hrs_(cap) + ' available' : '') + '</tr></table>';
+  if (cap && printer > cap) html += '<p style="font:14px Arial,sans-serif;color:' + bad + '">Printers are over capacity for this volume. The print queue, not staffing, sets the pace.</p>';
+  if (missing) html += '<p style="font:13px Arial,sans-serif;color:' + muted + '">' + missing + ' step' + (missing > 1 ? 's have' : ' has') + ' no target yet and ' + (missing > 1 ? 'are' : 'is') + ' left out of these hours.</p>';
+  if (products.length) {
+    html += '<h3 style="font:600 13px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + ';margin:18px 0 6px">Planned units</h3><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><tr>' + th('Product') + thn('Units') + '</tr>';
+    products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + tdn(num_(p.units)) + '</tr>'; });
+    html += '</table>';
+  }
+  if (steps.length) {
+    html += '<h3 style="font:600 13px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + ';margin:18px 0 6px">Hours by step</h3><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><tr>' + th('Product') + th('Step') + thn('Units') + thn('Hours') + '</tr>';
+    steps.forEach(x => { html += '<tr>' + td(esc_(x.product)) + td(esc_(x.step) + (x.printer ? ' <span style="color:' + accent + ';font-size:12px">(printer)</span>' : '')) + tdn(x.units == null ? '—' : num_(x.units)) + tdn(hrs_(x.hours)) + '</tr>'; });
+    html += '</table>';
+  }
+  html += '<p style="font:12px Arial,sans-serif;color:' + muted + ';margin-top:18px">Printer hours run alongside hands-on work and are not part of labor hours.' + (pageUrl ? ' <a href="' + esc_(pageUrl) + '" style="color:' + accent + '">Open the tracker</a>' : '') + '</p></div>';
+
+  let text = 'Print room forecast, ' + label + (sentBy ? ' (sent by ' + sentBy + ')' : '') + '\n\n';
+  if (note) text += note + '\n\n';
+  text += 'Labor hours: ' + hrs_(labor) + ' (incl. overhead)\nPeople needed: ' + num_(people, 1) + '\nPrinter hours: ' + (printer ? hrs_(printer) : '—') + (cap ? ' of ' + hrs_(cap) + ' available' : '') + '\n\n';
+  if (products.length) text += 'Planned units\n' + products.map(p => '  ' + p.name + ': ' + num_(p.units)).join('\n') + '\n\n';
+  if (steps.length) text += 'Hours by step\n' + steps.map(x => '  ' + x.product + ' · ' + x.step + ': ' + hrs_(x.hours) + ' h').join('\n') + '\n';
+
+  MailApp.sendEmail({ to: list.join(','), subject: subject, htmlBody: html, body: text, name: 'Print Room Tracker' });
+  props.setProperty(dayKey, String(sentToday + 1));
+
+  // keep a record of what went out
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let log = ss.getSheetByName('Reports');
+  if (!log) { log = ss.insertSheet('Reports'); log.getRange(1, 1, 1, 8).setValues([['sentAt','report','period','laborHours','peopleNeeded','printerHours','sentBy','recipients']]).setFontWeight('bold'); log.setFrozenRows(1); }
+  log.appendRow([new Date(), label, period, Math.round(labor * 10) / 10, Math.round(people * 10) / 10, Math.round(printer * 10) / 10, sentBy, list.join(', ')]);
+  return { ok: true, sentTo: list.length };
+}
+
+/** Run once from the editor after pasting this version, to allow the script to send email as you. */
+function authorizeEmail() { Logger.log('Emails left today: ' + MailApp.getRemainingDailyQuota()); }
 
 /** Run once from the editor (select setup, press Run) to create the tabs and grant access. */
 function setup() { entriesSheet_(); configSheet_(); }

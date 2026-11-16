@@ -29,6 +29,18 @@ When a new `Code.gs` comes along, paste it over the old one in Extensions → Ap
 back on the `PASSCODE` line, save, then Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy.
 The web app URL stays the same.
 
+## Emailed forecast reports
+
+The Forecast tab's **Email report** button sends the forecast shown on screen to the addresses on Setup →
+Forecast email list. The sheet's script sends it with Gmail from the Google account that owns the sheet, so
+replies go to that account. Recipients always come from the saved list, never from the page.
+
+- Limits: 25 recipients per report and 20 reports a day. A personal Gmail account can send to about 100
+  recipients a day through scripts in total.
+- Every report sent is logged on the sheet's `Reports` tab.
+- After pasting a script version that adds email, run `authorizeEmail` once from the Apps Script editor and
+  approve the "send email as you" permission, then deploy a new version.
+
 ## Raw data
 
 The `Entries` tab has one row per task: date, start, end (epoch ms plus readable times), minutes, employee,
