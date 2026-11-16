@@ -204,7 +204,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
           <div class="head">
             <div>
               <h2 id="formTitle">Start a task</h2>
-              <p class="sub" id="formHint">Start a timer when you begin a step. Stop it with the count when you finish. Start a print run as its own timer, then log your hands-on work while it prints.</p>
+              <p class="sub" id="formHint">Start a timer when you begin a step. Stop it with the count when you finish. Print time comes from the printers' own logs, so there's nothing to time while a job prints.</p>
             </div>
             <div class="seg" role="group" aria-label="Entry mode">
               <button type="button" id="modeLive" aria-pressed="true">Timer</button>
@@ -281,15 +281,14 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
     <!-- DASHBOARD -->
     <section id="view-dashboard" class="section" data-view="dashboard" hidden>
       <div class="head">
-        <div><h2>Volume</h2><p class="sub">Started counts units at each product's first step, Printed at its print run, and Finished at its finishing step (Ship for most items, Package for ribbons). Weeks start Monday.</p></div>
+        <div><h2>Volume</h2><p class="sub">Started counts units at each product's first step (Prep/Queue/Label), which is when they're queued to print. Finished counts units at the finishing step (Ship for most items, Package for ribbons). Printer hours are estimated from units started and each product's print rate from the printer logs. Weeks start Monday.</p></div>
         <div class="row">
           <label class="f">As of<input id="dashDate" type="date"></label>
           <div class="seg" role="group" aria-label="Metric">
-            <button type="button" data-metric="started" aria-pressed="false">Started</button>
-            <button type="button" data-metric="printed" aria-pressed="true">Printed</button>
+            <button type="button" data-metric="started" aria-pressed="true">Started</button>
             <button type="button" data-metric="finished" aria-pressed="false">Finished</button>
             <button type="button" data-metric="labor" aria-pressed="false">Labor hrs</button>
-            <button type="button" data-metric="printer" aria-pressed="false">Printer hrs</button>
+            <button type="button" data-metric="printer" aria-pressed="false">Est. printer hrs</button>
           </div>
         </div>
       </div>
@@ -415,7 +414,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
         </div>
       </div>
       <div class="section">
-        <div class="head"><h3>Products and steps</h3><span class="note">Drag the dotted handle (or use ↑ ↓) to set the order steps appear in the floor log. Distributors are logged on the top step only. Target = units per hour (your sheet's Hourly Target). Share = fraction of units that go through the step. Overhead steps use hours per day.</span></div>
+        <div class="head"><h3>Products and steps</h3><span class="note">Drag the dotted handle (or use ↑ ↓) to set the order steps appear in the floor log. Distributors are logged on the top step only. Printer steps don't appear on the floor log; their target is the print rate from the printers' job logs. Target = units per hour (your sheet's Hourly Target). Share = fraction of units that go through the step. Overhead steps use hours per day.</span></div>
         <div id="prodEditor" class="section"></div>
       </div>
     </section>
@@ -484,9 +483,9 @@ let draft = null;             // setup being edited
 const entries = new Map();    // id -> entry
 let editing = null;           // {id} while editing an entry
 let mode = "live";
-const UNIT_STAGES = { started:"Started", printed:"Printed", finished:"Finished" };
+const UNIT_STAGES = { started:"Started", finished:"Finished" };
 const savedMetric = store.get("prt.metric");
-let dashMetric = (UNIT_STAGES[savedMetric] || savedMetric === "labor" || savedMetric === "printer") ? savedMetric : "printed";
+let dashMetric = (UNIT_STAGES[savedMetric] || savedMetric === "labor" || savedMetric === "printer") ? savedMetric : "started";
 let fcPeriod = "week";
 let fcPlan = {};              // productId -> units
 const todayStr = () => ymd(new Date());
@@ -623,7 +622,9 @@ function fillSelects(){
 function fillSteps(keep){
   const p = prod($("#fProd").value);
   const cur = keep ?? $("#fStep").value;
-  $("#fStep").innerHTML = (p?.steps||[]).map(s => opt(s.id, s.name + (s.kind==="machine"?" (printer)":""), s.id===cur)).join("");
+  // Printer steps are timed from the printers' own logs, so techs don't log them. An old printer entry can still be edited.
+  const steps = (p?.steps||[]).filter(s => s.kind !== "machine" || (editing && s.id === keep));
+  $("#fStep").innerHTML = steps.map(s => opt(s.id, s.name + (s.kind==="machine"?" (printer)":""), s.id===cur)).join("");
   syncFormFields();
 }
 function syncFormFields(){
@@ -715,7 +716,7 @@ $("#btnSave").addEventListener("click", async () => {
     formSplits = defaultSplits(prod(f.productId)); renderFormSplits();
   } catch(err) { formMsg("Couldn't save: " + err.message, true); }
 });
-function endEdit(){ editing=null; $("#btnCancelEdit").hidden=true; setMode("live"); formSplits = defaultSplits(prod($("#fProd").value)); $("#fQty").readOnly=false; renderFormSplits(); }
+function endEdit(){ editing=null; $("#btnCancelEdit").hidden=true; if (step($("#fProd").value, $("#fStep").value)?.kind === "machine") fillSteps(""); setMode("live"); formSplits = defaultSplits(prod($("#fProd").value)); $("#fQty").readOnly=false; renderFormSplits(); }
 $("#btnCancelEdit").addEventListener("click", endEdit);
 
 function beginEdit(e){
@@ -743,7 +744,7 @@ function paintTimers(){
   const list = openTimers();
   const nPaused = list.filter(t => t.pausedAt).length;
   $("#runCount").textContent = list.length ? `${list.length} open${nPaused ? ` · ${nPaused} paused` : ""}` : "";
-  if (!list.length) { $("#timers").innerHTML = `<div class="empty">No timers running. Start one when a step begins; print runs can run alongside hands-on work.</div>`; return; }
+  if (!list.length) { $("#timers").innerHTML = `<div class="empty">No timers running. Start one when a step begins.</div>`; return; }
   $("#timers").innerHTML = list.map(t => {
     const p=prod(t.productId), s=step(t.productId,t.stepId), machine=t.kind==="machine";
     const paused = !!t.pausedAt;
@@ -903,10 +904,18 @@ function stageStep(p, stage){
   if (stage === "finished") return p.completeStep || null;
   return null;
 }
+// Printer time = units started × (1 / print rate). Print rates come from the printers' job logs, set on each product's printer step.
+function printRate(p){ const s = p?.steps?.find(x => x.kind === "machine"); return s && Number(s.est) > 0 ? { s, rate: Number(s.est) } : null; }
+function estPrinterHours(entries, p){
+  const pr = printRate(p); if (!pr || p.overhead) return null;
+  const sid = p.steps[0]?.id;
+  const units = entries.filter(e => e.productId===p.id && e.stepId===sid).reduce((a,e)=>a+(Number(e.qty)||0),0);
+  return units * (pr.s.share ?? 1) / pr.rate;
+}
 function metricFor(entries, p, metric){
   if (UNIT_STAGES[metric]) { const sid = stageStep(p, metric); return sid ? entries.filter(e => e.productId===p.id && e.stepId===sid).reduce((a,e)=>a+(Number(e.qty)||0),0) : null; }
-  const kind = metric === "labor" ? "labor" : "machine";
-  return entries.filter(e => e.productId===p.id && e.kind===kind).reduce((a,e)=>a+hoursOf(e),0);
+  if (metric === "printer") return estPrinterHours(entries, p);
+  return entries.filter(e => e.productId===p.id && e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0);
 }
 function renderDashboard(){
   const anchor = parseYmd($("#dashDate").value || todayStr());
@@ -916,26 +925,26 @@ function renderDashboard(){
   // KPIs for the week
   const wk = byP.week;
   const stageTotal = st => products().reduce((a,p)=>a+(metricFor(wk,p,st)||0),0);
-  const started = stageTotal("started"), printed = stageTotal("printed"), units = stageTotal("finished");
+  const started = stageTotal("started"), units = stageTotal("finished");
   const lab = wk.filter(e=>e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0);
-  const mac = wk.filter(e=>e.kind==="machine").reduce((a,e)=>a+hoursOf(e),0);
+  const mac = products().reduce((a,p)=>a+(estPrinterHours(wk,p)||0),0);
   const days = new Set(wk.map(e=>e.date)).size;
   $("#kpis").innerHTML = [
     [fmtNum(started), "Units started", `Week of ${parseYmd(R.week[0]).toLocaleDateString(undefined,{month:"short",day:"numeric"})}`],
-    [fmtNum(printed), "Units printed", mac ? `${fmtH(mac)} printer hours` : "No print runs logged"],
     [fmtNum(units), "Units finished", units && lab ? `${fmtNum(units/lab,1)} per labor hour` : "Logged at Ship / Package"],
-    [fmtH(lab), "Labor hours", days ? `${fmtH(lab/days)} per working day` : "No time logged"]
+    [fmtH(lab), "Labor hours", days ? `${fmtH(lab/days)} per working day` : "No time logged"],
+    [fmtH(mac), "Est. printer hours", "From units started and printer-log rates"]
   ].map(([v,l,s]) => `<div class="kpi"><span class="l">${l}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></div>`).join("");
   // matrix
   const isUnits = !!UNIT_STAGES[dashMetric];
   const fmt = v => v==null ? "—" : isUnits ? fmtNum(v) : fmtH(v);
-  const prods = products().filter(p => !isUnits || !p.overhead);
+  const prods = products().filter(p => dashMetric === "labor" || !p.overhead);
   const totals = Object.fromEntries(cols.map(([k]) => [k, 0]));
   let body = prods.map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td>` + cols.map(([k]) => { const v = metricFor(byP[k], p, dashMetric); totals[k] += v||0; return `<td class="n">${fmt(v)}</td>`; }).join("") + `</tr>`).join("");
   body += `<tr class="total"><td>Total</td>${cols.map(([k]) => `<td class="n">${fmt(totals[k])}</td>`).join("")}</tr>`;
   const label = (k) => { const [a,b]=R[k]; const A=parseYmd(a), B=parseYmd(b); const o={month:"short",day:"numeric"};
     return k==="day" ? A.toLocaleDateString(undefined,o) : k==="week" ? `${A.toLocaleDateString(undefined,o)}–${B.toLocaleDateString(undefined,o)}` : k==="month" ? A.toLocaleDateString(undefined,{month:"long"}) : k==="quarter" ? `Q${Math.floor(A.getMonth()/3)+1}` : String(A.getFullYear()); };
-  $("#volTable").innerHTML = `<thead><tr><th>${isUnits?`Units ${UNIT_STAGES[dashMetric].toLowerCase()}`:dashMetric==="labor"?"Labor hours":"Printer hours"}</th>${cols.map(([k,n]) => `<th class="n">${n}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${label(k)}</span></th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+  $("#volTable").innerHTML = `<thead><tr><th>${isUnits?`Units ${UNIT_STAGES[dashMetric].toLowerCase()}`:dashMetric==="labor"?"Labor hours":"Est. printer hours"}</th>${cols.map(([k,n]) => `<th class="n">${n}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${label(k)}</span></th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
   renderChart(anchor, all, isUnits ? dashMetric : "finished");
   // distributors (year to date)
   const yr = byP.year, mo = byP.month;
@@ -994,6 +1003,9 @@ function renderTimeStudy(){
       const r = by[p.id+"|"+s.id] || {units:0,hours:0,n:0,rate:null};
       if (p.overhead) { const perDay = workdays ? r.hours/workdays : null;
         html += `<tr><td>${esc(s.name)}</td><td class="n">${fmtNum(s.perDay,2)} h/day</td><td class="n">${perDay!=null&&r.n?fmtNum(perDay,2)+" h/day":"—"}</td><td></td><td class="n">${r.n}</td><td class="n">—</td><td class="n">${fmtH(r.hours)}</td><td class="n">—</td><td></td></tr>`; continue; }
+      if (s.kind === "machine") {
+        html += `<tr><td>${esc(s.name)} <span class="pill machine">printer</span></td><td class="n">${s.est?fmtNum(s.est,1):"—"}</td><td class="n">—</td><td>${s.est?`<span class="pill">From printer logs</span>`:`<span class="pill warn">No printer rate</span>`}</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">${s.est?fmtNum(60/s.est,1):"—"}</td><td></td></tr>`; continue;
+      }
       const trusted = r.n >= 3 && r.rate;
       html += `<tr><td>${esc(s.name)} ${s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${s.est?fmtNum(s.est,0):"—"}</td><td class="n">${r.rate?fmtNum(r.rate,1):"—"}</td>
         <td>${r.rate ? (s.est ? verdict(s.est, r.rate) : `<span class="pill warn">No target</span>`) : (s.est?`<span class="pill">Needs data</span>`:`<span class="pill warn">No data</span>`)}${r.rate && !trusted ? ` <span class="note">(${r.n} of 3)</span>`:""}</td>
@@ -1029,10 +1041,11 @@ function computeForecast(){
     const U = Number(fcPlan[p.id]||0); if (!U) continue;
     for (const s of p.steps) {
       const r = by[p.id+"|"+s.id];
-      const measuredShare = done[p.id] >= 10 && r ? Math.min(2, r.units/done[p.id]) : null;
+      const machine = s.kind === "machine";
+      const measuredShare = !machine && done[p.id] >= 10 && r ? Math.min(2, r.units/done[p.id]) : null;
       const share = measuredShare ?? (s.share ?? 1);
-      const rate = r && r.n>=3 && r.rate ? r.rate : s.est || null;
-      const src = r && r.n>=3 && r.rate ? "actual" : s.est ? "target" : "missing";
+      const rate = machine ? (Number(s.est) || null) : (r && r.n>=3 && r.rate ? r.rate : s.est || null);
+      const src = machine ? (s.est ? "printer log" : "missing") : (r && r.n>=3 && r.rate ? "actual" : s.est ? "target" : "missing");
       const hours = rate ? U*share/rate : null;
       if (hours==null && share>0) missing++;
       if (hours) { if (s.kind==="machine") printer+=hours; else labor+=hours; }
