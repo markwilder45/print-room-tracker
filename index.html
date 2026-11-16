@@ -74,8 +74,8 @@ label.f,div.f{display:grid;gap:4px;font-size:12px;font-weight:600;letter-spacing
 select{text-overflow:ellipsis}
 .optional{text-transform:none;letter-spacing:0;font-weight:400}
 .splits{display:grid;gap:8px;justify-items:start}
-.splitrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;width:100%}
-.splitrow.multi{grid-template-columns:minmax(0,1fr) 96px auto}
+.splitrow,.splithead{display:grid;grid-template-columns:minmax(0,1fr) 110px 64px;gap:8px;align-items:center;width:100%}
+.splithead span{font:600 11px var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 .splitrow input[type=number]{text-align:right}
 .splittotal{font:600 13px var(--mono);color:var(--muted)}
 .timer .splits{grid-column:1/-1;width:100%}
@@ -580,10 +580,11 @@ function encodeSplits(rows){
 const splitTotal = rows => rows.reduce((a, r) => a + (Number(r.qty) || 0), 0);
 const splitText = e => { const r = decodeSplits(e); return r.length > 1 ? r.map(x => `${x.name} ${fmtNum(x.qty)}`).join(", ") : (r[0]?.name || ""); };
 function splitEditorHTML(scope, rows){
+  if (!rows.length) rows = [{ name: "", qty: null }];
   const dists = config?.distributors || [], multi = rows.length > 1;
   const sel = (i, v) => `<select id="sp-${scope}-${i}-name" data-split="${esc(scope)}" data-i="${i}" data-k="name" aria-label="Distributor ${i+1}">${opt("", "Choose distributor…")}${dists.map(d => opt(d, d, d === v)).join("")}${v && !dists.includes(v) ? opt(v, v, true) : ""}</select>`;
-  return `<div class="splits">${rows.map((r, i) => `<div class="splitrow${multi ? " multi" : ""}">${sel(i, r.name)}${multi ? `<input type="number" min="0" step="1" inputmode="numeric" id="sp-${scope}-${i}-qty" data-split="${esc(scope)}" data-i="${i}" data-k="qty" value="${r.qty ?? ""}" placeholder="Units" aria-label="Units for distributor ${i+1}">` : ""}<button type="button" class="link" data-split="${esc(scope)}" data-i="${i}" data-act="rm" aria-label="Remove distributor ${i+1}" style="color:var(--bad)">Remove</button></div>`).join("")}
-    <div class="row" style="gap:12px"><button type="button" class="link" data-split="${esc(scope)}" data-act="add">+ ${rows.length === 1 ? "Split across another distributor" : "Add distributor"}</button>${multi ? `<span class="splittotal">Total ${fmtNum(splitTotal(rows))} units</span>` : ""}</div></div>`;
+  return `<div class="splits"><div class="splithead" aria-hidden="true"><span>Distributor</span><span>Units</span><span></span></div>${rows.map((r, i) => `<div class="splitrow">${sel(i, r.name)}<input type="number" min="0" step="1" inputmode="numeric" id="sp-${scope}-${i}-qty" data-split="${esc(scope)}" data-i="${i}" data-k="qty" value="${r.qty ?? ""}" placeholder="0" aria-label="Units for distributor ${i+1}">${multi ? `<button type="button" class="link" data-split="${esc(scope)}" data-i="${i}" data-act="rm" aria-label="Remove distributor ${i+1}" style="color:var(--bad)">Remove</button>` : "<span></span>"}</div>`).join("")}
+    <div class="row" style="gap:12px"><button type="button" class="link" data-split="${esc(scope)}" data-act="add">+ Add distributor</button>${multi ? `<span class="splittotal">Total ${fmtNum(splitTotal(rows))} units</span>` : ""}</div></div>`;
 }
 let formSplits = [];
 // Distributors are captured once, on each product's first step (top of its order in Setup).
@@ -591,19 +592,21 @@ const firstStepId = pid => prod(pid)?.steps?.[0]?.id || null;
 const isFirstStep = (pid, sid) => !!sid && firstStepId(pid) === sid;
 const distRequired = p => !!p && !p.overhead && p.distributorRequired !== false;
 const namedSplits = rows => rows.filter(r => r.name);
-function defaultSplits(p){ return p?.defaultDistributor ? [{ name: p.defaultDistributor, qty: null }] : []; }
+function defaultSplits(p){ return [{ name: p?.defaultDistributor || "", qty: null }]; }
 function renderFormSplits(){
   const pid = $("#fProd").value, p = prod(pid);
+  const qtyField = $("#fQty").closest("label");
   if (p && !p.overhead && !isFirstStep(pid, $("#fStep").value)) {
     formSplits = [];
     $("#fSplits").innerHTML = `<p class="note" style="margin:0">Distributors are logged once, at <b>${esc(p.steps[0]?.name || "the first step")}</b>. Here, just enter the total units.</p>`;
-    $("#fQty").readOnly = false; $("#qtyHint").textContent = qtyHintText(); return;
+    qtyField.hidden = false; $("#fQty").readOnly = false; $("#qtyHint").textContent = qtyHintText(); return;
   }
+  if (!p || p.overhead) { qtyField.hidden = false; $("#fQty").readOnly = false; $("#qtyHint").textContent = qtyHintText(); return; }
+  // first step: units are entered beside each distributor, so the separate Quantity box steps aside
+  if (!formSplits.length) formSplits = [{ name: p.defaultDistributor || "", qty: $("#fQty").value === "" ? null : Number($("#fQty").value) }];
   $("#fSplits").innerHTML = splitEditorHTML("form", formSplits);
-  const multi = formSplits.length > 1, q = $("#fQty");
-  q.readOnly = multi;
-  if (multi) q.value = splitTotal(formSplits) || "";
-  $("#qtyHint").textContent = multi ? "(total across distributors)" : qtyHintText();
+  qtyField.hidden = true;
+  $("#fQty").value = formSplits.some(r => r.qty != null) ? splitTotal(formSplits) : "";
 }
 function qtyHintText(){ const p = prod($("#fProd").value), s = step($("#fProd").value, $("#fStep").value); return p?.overhead ? "(optional)" : s?.kind === "machine" ? "(units printed)" : "(units)"; }
 
@@ -653,7 +656,7 @@ $("#modeManual").addEventListener("click", () => setMode("manual"));
 function readForm(){
   const pid=$("#fProd").value, sid=$("#fStep").value, s=step(pid,sid), p=prod(pid);
   return { employee: $("#fEmp").value, productId: pid, stepId: sid, kind: s?.kind || "labor",
-    qty: formSplits.length > 1 ? splitTotal(formSplits) : ($("#fQty").value === "" ? null : Math.max(0, Number($("#fQty").value))),
+    qty: (p && !p.overhead && isFirstStep(pid, sid)) ? (formSplits.some(r => r.qty != null) ? splitTotal(formSplits) : null) : ($("#fQty").value === "" ? null : Math.max(0, Number($("#fQty").value))),
     distributor: p && !p.overhead && isFirstStep(pid, sid) ? encodeSplits(formSplits) : null,
     printer: s?.kind==="machine" ? ($("#fPrinter").value || null) : null,
     note: $("#fNote").value.trim() || null };
@@ -753,7 +756,7 @@ function paintTimers(){
       <div class="what">${paused ? `<span class="pill paused">Paused since ${fmtTime(t.pausedAt)}</span> ` : ""}${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)} · since ${fmtTime(t.start)}${t.pausedMs ? ` · ${fmtElapsed(t.pausedMs)} paused` : ""}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}</div></div>
       <div class="el" data-tid="${esc(t.id)}" title="Worked time (pauses not counted)">${fmtElapsed(activeMs(t))}</div>
       ${p && !p.overhead && isFirstStep(t.productId, t.stepId) ? splitEditorHTML(t.id, timerRows(t)) : ""}
-      <div class="act">${timerRows(t).length > 1 ? `<span class="splittotal">${fmtNum(splitTotal(timerRows(t)))} units total</span>` : `<input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">`}
+      <div class="act">${p && !p.overhead && isFirstStep(t.productId, t.stepId) ? (timerRows(t).length > 1 ? `<span class="splittotal">${fmtNum(splitTotal(timerRows(t)))} units total</span>` : "") : `<input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">`}
         <button class="b small" type="button" data-pause="${esc(t.id)}">${paused ? (armedResume.has(t.id) ? "Resume anyway?" : "Resume") : "Pause"}</button>
         <button class="b primary small" type="button" data-stop="${esc(t.id)}">Stop &amp; save</button>
         <button class="link" type="button" data-discard="${esc(t.id)}">Discard</button></div></div>`;
@@ -796,8 +799,8 @@ $("#timers").addEventListener("click", async ev => {
     setTimeout(() => document.getElementById(`sp-${t.id}-0-name`)?.focus(), 50);
     toast("Add at least one distributor before saving this step"); return;
   }
-  const q = multi ? String(splitTotal(rows)) : $(`#q-${CSS.escape(t.id)}`).value;
-  if ((q === "" || (multi && !splitTotal(rows))) && !prod(t.productId)?.overhead) { (multi ? $(`#sp-${CSS.escape(t.id)}-0-qty`) : $(`#q-${CSS.escape(t.id)}`))?.focus(); toast(multi ? "Enter units for each distributor first" : "Enter the units finished first"); return; }
+  const q = first ? (rows.some(r => r.qty != null) ? String(splitTotal(rows)) : "") : $(`#q-${CSS.escape(t.id)}`).value;
+  if (q === "" && !prod(t.productId)?.overhead) { (first ? $(`#sp-${CSS.escape(t.id)}-0-qty`) : $(`#q-${CSS.escape(t.id)}`))?.focus(); toast(multi ? "Enter units for each distributor first" : "Enter the units finished first"); return; }
   ev.target.disabled = true;
   try { applyEntry((await api({ action:"stop", id:t.id, end: Date.now(), qty: q }, "POST")).entry); renderAll(); toast("Saved"); }
   catch(err){ ev.target.disabled=false; toast("Couldn't stop: " + err.message); }
@@ -806,9 +809,7 @@ $("#timers").addEventListener("click", async ev => {
 // Split editor events: the form keeps its rows locally; a running timer saves its rows to the sheet.
 const timerSaves = new Map();   // timer id -> promise chain, so edits to one timer save in order
 function saveTimerSplits(t, rows){
-  const qtyInput = $(`#q-${CSS.escape(t.id)}`);
-  const single = qtyInput && qtyInput.value !== "" ? Number(qtyInput.value) : t.qty;
-  const next = { ...t, distributor: encodeSplits(rows), qty: rows.filter(r=>r.name).length > 1 ? splitTotal(rows) : (single ?? null) };
+  const next = { ...t, distributor: encodeSplits(rows), qty: rows.some(r => r.qty != null) ? splitTotal(rows) : null };
   // keep empty lines on screen while they're being filled in
   next._draftRows = rows;
   entries.set(t.id, next); renderTimers(true);
@@ -818,7 +819,7 @@ function saveTimerSplits(t, rows){
     .catch(err => toast("Couldn't save the distributors: " + err.message));
   timerSaves.set(t.id, chain);
 }
-function timerRows(t){ return t._draftRows || decodeSplits(t); }
+function timerRows(t){ if (t._draftRows) return t._draftRows; const d = decodeSplits(t); return d.length ? d : [{ name: "", qty: t.qty ?? null }]; }
 function rowsFor(scope){
   if (scope === "form") return formSplits;
   const t = entries.get(scope); if (!t) return null;
@@ -833,15 +834,9 @@ function commitRows(scope, rows){
 document.addEventListener("click", ev => {
   const b = ev.target.closest("[data-split][data-act]"); if (!b) return;
   const scope = b.dataset.split, rows = rowsFor(scope); if (!rows) return;
-  if (b.dataset.act === "add") {
-    if (rows.length === 1 && rows[0].qty == null) {
-      const v = scope === "form" ? $("#fQty").value : $(`#q-${CSS.escape(scope)}`)?.value;
-      rows[0].qty = v === "" || v == null ? null : Number(v);
-    }
-    rows.push({ name: "", qty: null });
-  } else { rows.splice(+b.dataset.i, 1); if (rows.length === 1 && scope === "form" && rows[0].qty != null) $("#fQty").value = rows[0].qty; }
-  if (scope === "form") { commitRows(scope, rows); }
-  else commitRows(scope, rows);
+  if (b.dataset.act === "add") rows.push({ name: "", qty: null });
+  else if (rows.length > 1) rows.splice(+b.dataset.i, 1);
+  commitRows(scope, rows);
   const focusIdx = b.dataset.act === "add" ? rows.length - 1 : Math.max(0, +b.dataset.i - 1);
   document.getElementById(`sp-${scope}-${focusIdx}-name`)?.focus();
 });
@@ -849,7 +844,8 @@ document.addEventListener("input", ev => {
   const el = ev.target; if (!el.dataset?.split || el.dataset.split !== "form") return;
   const rows = formSplits, r = rows[+el.dataset.i]; if (!r) return;
   r[el.dataset.k] = el.dataset.k === "qty" ? (el.value === "" ? null : Number(el.value)) : el.value;
-  if (rows.length > 1) { $("#fQty").value = splitTotal(rows) || ""; const tot = el.closest(".splits")?.querySelector(".splittotal"); if (tot) tot.textContent = `Total ${fmtNum(splitTotal(rows))} units`; }
+  $("#fQty").value = rows.some(x => x.qty != null) ? splitTotal(rows) : "";
+  const tot = el.closest(".splits")?.querySelector(".splittotal"); if (tot) tot.textContent = `Total ${fmtNum(splitTotal(rows))} units`;
 });
 document.addEventListener("change", ev => {
   const el = ev.target; if (!el.dataset?.split || el.dataset.split === "form") return;
