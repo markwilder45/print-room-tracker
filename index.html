@@ -1080,7 +1080,7 @@ function daysWaiting(pid){
 }
 function waitingHTML(pid){
   const d = daysWaiting(pid); if (d == null) return `<span class="note">—</span>`;
-  const cls = d >= 14 ? "bad" : d >= 7 ? "warn" : "good";
+  const cls = d >= 3 ? "bad" : d >= 2 ? "warn" : "good";   // green under 2 days, amber at 2, red at 3 or more
   return `<span class="pill ${cls}">${d === 0 ? "today" : d + (d === 1 ? " day" : " days")}</span>`;
 }
 function avgVolume(p){ const since=ymd(addDays(new Date(),-27)); const u=finished().filter(e=>e.date>=since && e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0); const perDay=u/(4*(config?.workdaysPerWeek||5)); return perDay*periodDays(); }

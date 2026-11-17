@@ -235,7 +235,7 @@ function emailReport_(r) {
   if (products.length) {
     const anyOld = products.some(p => p.oldest);
     html += '<h3 style="font:600 13px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + ';margin:18px 0 6px">Planned units' + (anyOld ? ' and backlog' : '') + '</h3><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><tr>' + th('Product') + thn('Units') + (anyOld ? th('Oldest order') + thn('Waiting') : '') + '</tr>';
-    products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + tdn(p.units ? num_(p.units) : '—') + (anyOld ? td(p.oldest ? esc_(p.oldest) : '—') + tdn(p.days == null ? '—' : daysTxt(p.days)) : '') + '</tr>'; });
+    products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + tdn(p.units ? num_(p.units) : '—') + (anyOld ? td(p.oldest ? esc_(p.oldest) : '—') + tdn(p.days == null ? '—' : '<span style="font-weight:700;color:' + (p.days >= 3 ? bad : p.days >= 2 ? '#a86300' : '#23794a') + '">' + daysTxt(p.days) + '</span>') : '') + '</tr>'; });
     html += '</table>';
   }
   if (steps.length) {
