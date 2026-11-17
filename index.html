@@ -492,6 +492,8 @@ const savedMetric = store.get("prt.metric");
 let dashMetric = (UNIT_STAGES[savedMetric] || savedMetric === "labor" || savedMetric === "printer") ? savedMetric : "started";
 let fcPeriod = "week";
 let fcPlan = {};              // productId -> units
+// productId -> "YYYY-MM-DD" of the oldest open order; kept on this device so a refresh doesn't lose it
+let fcOldest = (() => { try { return JSON.parse(localStorage.getItem("prt.oldest") || "{}") || {}; } catch { return {}; } })();
 const todayStr = () => ymd(new Date());
 
 const products = () => (config?.products || []);
@@ -1066,9 +1068,20 @@ function computeForecast(){
   return {lines, labor, printer, missing, D};
 }
 function renderForecast(){
-  $("#fcInputs").innerHTML = `<thead><tr><th>Product</th><th class="n">Planned units</th><th class="n">Avg / ${fcPeriod}</th></tr></thead><tbody>` +
-    products().filter(p=>!p.overhead).map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td><td class="n"><input type="number" min="0" step="1" inputmode="numeric" id="fc-${esc(p.id)}" data-fc="${esc(p.id)}" value="${fcPlan[p.id] ?? ""}" style="width:100px;text-align:right"></td><td class="n">${fmtNum(avgVolume(p))}</td></tr>`).join("") + `</tbody>`;
+  $("#fcInputs").innerHTML = `<thead><tr><th>Product</th><th class="n">Planned units</th><th>Oldest order</th><th class="n">Waiting</th><th class="n">Avg / ${fcPeriod}</th></tr></thead><tbody>` +
+    products().filter(p=>!p.overhead).map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td><td class="n"><input type="number" min="0" step="1" inputmode="numeric" id="fc-${esc(p.id)}" data-fc="${esc(p.id)}" value="${fcPlan[p.id] ?? ""}" style="width:90px;text-align:right" aria-label="Planned units for ${esc(p.name)}"></td><td><input type="date" id="fco-${esc(p.id)}" data-fco="${esc(p.id)}" value="${esc(fcOldest[p.id] || "")}" max="${esc($("#fcDate").value || todayStr())}" style="width:150px" aria-label="Oldest order date for ${esc(p.name)}"></td><td class="n" id="fcw-${esc(p.id)}">${waitingHTML(p.id)}</td><td class="n">${fmtNum(avgVolume(p))}</td></tr>`).join("") + `</tbody>`;
   renderForecastOut();
+}
+// Calendar days from the oldest open order to the day the report is for.
+function daysWaiting(pid){
+  const o = fcOldest[pid]; if (!o) return null;
+  const d = Math.round((parseYmd($("#fcDate").value || todayStr()) - parseYmd(o)) / 86400000);
+  return Math.max(0, d);
+}
+function waitingHTML(pid){
+  const d = daysWaiting(pid); if (d == null) return `<span class="note">—</span>`;
+  const cls = d >= 14 ? "bad" : d >= 7 ? "warn" : "good";
+  return `<span class="pill ${cls}">${d === 0 ? "today" : d + (d === 1 ? " day" : " days")}</span>`;
 }
 function avgVolume(p){ const since=ymd(addDays(new Date(),-27)); const u=finished().filter(e=>e.date>=since && e.productId===p.id && e.stepId===p.completeStep).reduce((a,e)=>a+(e.qty||0),0); const perDay=u/(4*(config?.workdaysPerWeek||5)); return perDay*periodDays(); }
 function renderForecastOut(){
@@ -1090,6 +1103,13 @@ function renderForecastOut(){
     `<thead><tr><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Rate /hr</th><th>Rate from</th><th class="n">Hours</th></tr></thead><tbody>` +
     L.map(l => `<tr><td><span class="sw" style="background:${colorVar(l.p)}"></span>${esc(l.p.name)}</td><td>${esc(l.s.name)} ${l.s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${l.units==null?"—":fmtNum(l.units)}</td><td class="n">${l.rate?fmtNum(l.rate,1):"—"}</td><td><span class="pill ${l.src==="actual"?"good":l.src==="missing"?"warn":""}">${l.p.overhead?(l.src==="actual"?"logged avg":"setup h/day"):l.src}</span></td><td class="n">${l.hours?fmtNum(l.hours,2):"—"}</td></tr>`).join("") + `</tbody>`;
 }
+$("#fcInputs").addEventListener("change", ev => {
+  const id = ev.target.dataset.fco; if (!id) return;
+  if (ev.target.value) fcOldest[id] = ev.target.value; else delete fcOldest[id];
+  try { localStorage.setItem("prt.oldest", JSON.stringify(fcOldest)); } catch {}
+  $(`#fcw-${CSS.escape(id)}`).innerHTML = waitingHTML(id);
+  if (!$("#emailPanel").hidden) openEmailPanel();
+});
 $("#fcInputs").addEventListener("input", ev => { const id=ev.target.dataset.fc; if (!id) return; fcPlan[id] = ev.target.value===""?"":Number(ev.target.value); renderForecastOut(); });
 $("#btnFillAvg").addEventListener("click", () => { for (const p of products()) if (!p.overhead) fcPlan[p.id] = Math.round(avgVolume(p)); renderForecast(); });
 $$("[data-period]").forEach(b => b.addEventListener("click", () => { fcPeriod=b.dataset.period; $$("[data-period]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); syncEmailButton(); renderForecast(); if (!$("#emailPanel").hidden) openEmailPanel(); }));
@@ -1111,7 +1131,12 @@ function buildReport(){
     period: fcPeriod, label: reportLabel(),
     laborHours: f.labor, peopleNeeded: f.labor / (hpp * f.D), printerHours: f.printer, printerCapacity: cap,
     hoursPerPerson: hpp, missingSteps: f.missing,
-    products: products().filter(p => !p.overhead && Number(fcPlan[p.id])).map(p => ({ name: p.name, units: Number(fcPlan[p.id]) })),
+    products: products().filter(p => !p.overhead && (Number(fcPlan[p.id]) || fcOldest[p.id])).map(p => {
+      const units = Number(fcPlan[p.id]) || 0, oldest = fcOldest[p.id] || null, d = daysWaiting(p.id);
+      // a sheet script older than version 4 ignores the date fields, so fold them into the name there
+      if (scriptVersion < 4 && oldest) return { name: `${p.name} (oldest order ${parseYmd(oldest).toLocaleDateString("en-US",{month:"short",day:"numeric"})}, ${d} days)`, units: units || 0.0001 };
+      return { name: p.name, units, oldest, daysWaiting: d };
+    }),
     steps: f.lines.filter(l => l.hours).map(l => ({ product: l.p.name, step: l.s.name, units: l.units, hours: l.hours, printer: l.s.kind === "machine" })),
     sentBy: $("#emailBy").value || "", note: $("#emailNote").value.trim(), pageUrl
   };
@@ -1120,7 +1145,8 @@ function openEmailPanel(){
   const list = config?.reportEmails || [], units = Object.values(fcPlan).reduce((a,v)=>a+(Number(v)||0),0);
   const f = computeForecast();
   $("#emailTitle").textContent = `Email the ${fcPeriod} forecast for ${reportLabel()}`;
-  $("#emailSub").textContent = list.length ? `${fmtH(f.labor)} labor hours · ${fmtNum(units)} planned units · goes to ${list.length} ${list.length>1?"people":"person"}:` : "";
+  const worst = products().filter(p => !p.overhead && daysWaiting(p.id) != null).sort((x,y) => daysWaiting(y.id) - daysWaiting(x.id))[0];
+  $("#emailSub").textContent = list.length ? `${fmtH(f.labor)} labor hours · ${fmtNum(units)} planned units${worst ? ` · furthest behind: ${worst.name}, ${daysWaiting(worst.id)} days` : ""} · goes to ${list.length} ${list.length>1?"people":"person"}:` : "";
   $("#emailTo").innerHTML = list.map(e => `<span class="chipx" style="padding-right:10px">${esc(e)}</span>`).join("");
   const emps = config?.employees || [], cur = $("#emailBy").value || store.get("prt.emp") || "";
   $("#emailBy").innerHTML = opt("", "—") + emps.map(n => opt(n, n, n === cur)).join("");
@@ -1135,7 +1161,10 @@ function openEmailPanel(){
 }
 $("#btnEmail").addEventListener("click", () => { openEmailPanel(); $("#emailPanel").scrollIntoView({ behavior:"smooth", block:"nearest" }); });
 $("#btnCancelEmail").addEventListener("click", () => { $("#emailPanel").hidden = true; });
-$("#fcDate").addEventListener("change", () => { if (!$("#emailPanel").hidden) openEmailPanel(); });
+$("#fcDate").addEventListener("change", () => {
+  for (const p of products()) { const c = document.getElementById(`fcw-${p.id}`); if (c) c.innerHTML = waitingHTML(p.id); const i = document.getElementById(`fco-${p.id}`); if (i) i.max = $("#fcDate").value || todayStr(); }
+  if (!$("#emailPanel").hidden) openEmailPanel();
+});
 $("#btnSendEmail").addEventListener("click", async () => {
   if (!online) { $("#emailMsg").textContent = "Not connected to the sheet. Reload the page."; return; }
   const units = Object.values(fcPlan).reduce((a,v)=>a+(Number(v)||0),0);

@@ -11,7 +11,7 @@
  */
 
 const PASSCODE = 'CHANGE-ME';   // change here to rotate; redeploy after changing
-const SCRIPT_VERSION = 3;           // 2 = pause / resume, 3 = emailed forecast reports
+const SCRIPT_VERSION = 4;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates in reports
 const MAX_RECIPIENTS = 25;          // per report
 const MAX_REPORTS_PER_DAY = 20;     // guards the Gmail sending quota
 const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt'];
@@ -199,13 +199,21 @@ function emailReport_(r) {
 
   const period = ['day','week','month'].indexOf(r.period) >= 0 ? r.period : 'day';
   const label = str_(r.label, 60);
-  const products = (Array.isArray(r.products) ? r.products : []).slice(0, 30).map(p => ({ name: str_(p.name, 60), units: Number(p.units) || 0 })).filter(p => p.units > 0);
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dateLabel_ = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || '')); return m ? MON[Number(m[2]) - 1] + ' ' + Number(m[3]) : ''; };
+  const products = (Array.isArray(r.products) ? r.products : []).slice(0, 30).map(p => {
+    const oldest = dateLabel_(p.oldest), days = oldest && isFinite(Number(p.daysWaiting)) ? Math.max(0, Math.round(Number(p.daysWaiting))) : null;
+    return { name: str_(p.name, 60), units: Number(p.units) || 0, oldest: oldest, days: days };
+  }).filter(p => p.units > 0 || p.oldest);
+  const waiting = products.filter(p => p.days != null).sort((a, b) => b.days - a.days);
+  const behind = waiting[0] || null;   // the product whose oldest order has waited longest
   const steps = (Array.isArray(r.steps) ? r.steps : []).slice(0, 120).map(x => ({ product: str_(x.product, 60), step: str_(x.step, 80), units: x.units == null ? null : Number(x.units), hours: Number(x.hours) || 0, printer: !!x.printer }));
   const labor = Number(r.laborHours) || 0, people = Number(r.peopleNeeded) || 0, printer = Number(r.printerHours) || 0, cap = Number(r.printerCapacity) || 0;
   const hpp = Number(r.hoursPerPerson) || 0, missing = Number(r.missingSteps) || 0;
   const sentBy = str_(r.sentBy, 60), note = str_(r.note, 500), pageUrl = /^https:\/\/[a-z0-9.-]+\.github\.io\//i.test(String(r.pageUrl || '')) ? String(r.pageUrl).slice(0, 200) : '';
 
-  const subject = 'Print room forecast, ' + label + ': ' + hrs_(labor) + ' labor hours';
+  const subject = 'Print room forecast, ' + label + ': ' + hrs_(labor) + ' labor hours' + (behind ? ' · oldest order ' + behind.days + (behind.days === 1 ? ' day' : ' days') : '');
+  const daysTxt = d => d == null ? '' : d === 0 ? 'today' : d + (d === 1 ? ' day' : ' days');
   const ink = '#132029', muted = '#5a6873', line = '#d6dee5', accent = '#0b6f93', bad = '#b0281f';
   const tile = (v, l, s) => '<td style="padding:10px 14px;border-left:3px solid ' + accent + ';vertical-align:top"><div style="font:600 11px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + '">' + l + '</div><div style="font:700 26px Arial,sans-serif;color:' + ink + '">' + v + '</div><div style="font:12px Arial,sans-serif;color:' + muted + '">' + s + '</div></td>';
   const th = t => '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid ' + line + ';font:600 11px Arial,sans-serif;letter-spacing:.05em;text-transform:uppercase;color:' + muted + '">' + t + '</th>';
@@ -223,9 +231,11 @@ function emailReport_(r) {
     tile(printer ? hrs_(printer) : '—', 'Printer hours', cap ? 'of ' + hrs_(cap) + ' available' : '') + '</tr></table>';
   if (cap && printer > cap) html += '<p style="font:14px Arial,sans-serif;color:' + bad + '">Printers are over capacity for this volume. The print queue, not staffing, sets the pace.</p>';
   if (missing) html += '<p style="font:13px Arial,sans-serif;color:' + muted + '">' + missing + ' step' + (missing > 1 ? 's have' : ' has') + ' no target yet and ' + (missing > 1 ? 'are' : 'is') + ' left out of these hours.</p>';
+  if (behind) html += '<p style="font:14px Arial,sans-serif;margin:6px 0">Furthest behind: <b>' + esc_(behind.name) + '</b>, oldest order ' + esc_(behind.oldest) + ' (' + daysTxt(behind.days) + ' waiting).</p>';
   if (products.length) {
-    html += '<h3 style="font:600 13px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + ';margin:18px 0 6px">Planned units</h3><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><tr>' + th('Product') + thn('Units') + '</tr>';
-    products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + tdn(num_(p.units)) + '</tr>'; });
+    const anyOld = products.some(p => p.oldest);
+    html += '<h3 style="font:600 13px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + ';margin:18px 0 6px">Planned units' + (anyOld ? ' and backlog' : '') + '</h3><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><tr>' + th('Product') + thn('Units') + (anyOld ? th('Oldest order') + thn('Waiting') : '') + '</tr>';
+    products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + tdn(p.units ? num_(p.units) : '—') + (anyOld ? td(p.oldest ? esc_(p.oldest) : '—') + tdn(p.days == null ? '—' : daysTxt(p.days)) : '') + '</tr>'; });
     html += '</table>';
   }
   if (steps.length) {
@@ -238,7 +248,8 @@ function emailReport_(r) {
   let text = 'Print room forecast, ' + label + (sentBy ? ' (sent by ' + sentBy + ')' : '') + '\n\n';
   if (note) text += note + '\n\n';
   text += 'Labor hours: ' + hrs_(labor) + ' (incl. overhead)\nPeople needed: ' + num_(people, 1) + '\nPrinter hours: ' + (printer ? hrs_(printer) : '—') + (cap ? ' of ' + hrs_(cap) + ' available' : '') + '\n\n';
-  if (products.length) text += 'Planned units\n' + products.map(p => '  ' + p.name + ': ' + num_(p.units)).join('\n') + '\n\n';
+  if (behind) text += 'Furthest behind: ' + behind.name + ', oldest order ' + behind.oldest + ' (' + daysTxt(behind.days) + ' waiting)\n\n';
+  if (products.length) text += 'Planned units\n' + products.map(p => '  ' + p.name + ': ' + (p.units ? num_(p.units) : '—') + (p.oldest ? '  · oldest order ' + p.oldest + ' (' + daysTxt(p.days) + ')' : '')).join('\n') + '\n\n';
   if (steps.length) text += 'Hours by step\n' + steps.map(x => '  ' + x.product + ' · ' + x.step + ': ' + hrs_(x.hours) + ' h').join('\n') + '\n';
 
   MailApp.sendEmail({ to: list.join(','), subject: subject, htmlBody: html, body: text, name: 'Print Room Tracker' });
