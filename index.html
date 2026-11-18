@@ -1034,7 +1034,7 @@ function renderTimeStudy(){
         html += `<tr><td>${esc(s.name)} <span class="pill machine">printer</span></td><td class="n">${s.est?fmtNum(s.est,1):"—"}</td><td class="n">—</td><td>${s.est?`<span class="pill">From printer logs</span>`:`<span class="pill warn">No printer rate</span>`}</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">${s.est?fmtNum(60/s.est,1):"—"}</td><td></td></tr>`; continue;
       }
       const trusted = r.n >= 3 && r.rate;
-      html += `<tr><td>${esc(s.name)} ${s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${s.est?fmtNum(s.est,0):"—"}</td><td class="n">${r.rate?fmtNum(r.rate,1):"—"}</td>
+      html += `<tr><td>${esc(s.name)} ${s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${s.est?fmtNum(s.est,1):"—"}</td><td class="n">${r.rate?fmtNum(r.rate,1):"—"}</td>
         <td>${r.rate ? (s.est ? verdict(s.est, r.rate) : `<span class="pill warn">No target</span>`) : (s.est?`<span class="pill">Needs data</span>`:`<span class="pill warn">No data</span>`)}${r.rate && !trusted ? ` <span class="note">(${r.n} of 3)</span>`:""}</td>
         <td class="n">${r.n}</td><td class="n">${fmtNum(r.units)}</td><td class="n">${fmtH(r.hours)}</td><td class="n">${r.rate?fmtNum(60/r.rate,1):"—"}</td>
         <td>${trusted && online && !emp ? `<button class="link" data-adopt="${esc(p.id)}|${esc(s.id)}|${r.rate.toFixed(1)}">Use actual</button>`:""}</td></tr>`;
