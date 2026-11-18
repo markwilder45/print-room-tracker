@@ -360,6 +360,19 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
           <span class="note" id="emailMsg"></span>
         </div>
       </div>
+      <div class="section" id="resSection">
+        <div class="head">
+          <div><h2 style="font-size:20px">Yesterday's results</h2><p class="sub">Earned hours are the units finished at each hands-on step divided by that step's target rate. Printer steps don't count; maintenance and clean-up count at the time logged. Productivity is earned hours divided by hours worked.</p></div>
+          <div class="row"><label class="f">Results for<input id="resDate" type="date"></label></div>
+        </div>
+        <div class="kpis" id="resKpis"></div>
+        <div class="grid2">
+          <div class="section"><h3>Hours worked</h3><div class="tablewrap"><table id="resTechs"></table></div><p class="note">Enter each tech's hours from the timeclock.</p></div>
+          <div class="section"><h3>Finished</h3><div class="tablewrap"><table id="resProducts"></table></div></div>
+        </div>
+        <div class="section"><h3>Where the time went</h3><div class="tablewrap"><table id="resSteps"></table></div><p class="note" id="resUnrated"></p></div>
+      </div>
+      <h2 style="font-size:20px;margin-top:6px" id="fcTodayHead">Today's forecast</h2>
       <div class="grid2">
         <div class="section">
           <h3>Planned units</h3>
@@ -413,6 +426,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
           <div class="fields">
             <label class="f">Productive hours per person per day<input id="setHrs" type="number" min="1" max="12" step="0.25"></label>
             <label class="f">Workdays per week<input id="setDays" type="number" min="1" max="7" step="1"></label>
+            <label class="f">Productivity goal (%)<input id="setGoal" type="number" min="50" max="150" step="1"></label>
           </div>
           <p class="note">Productive hours leave out breaks and meetings. Forecast staffing divides labor hours by this number.</p>
         </div>
@@ -530,7 +544,7 @@ async function connect(){
     applyConfig(d.config); serverTime = d.serverTime; scriptVersion = Number(d.scriptVersion) || 1;
     $$(".pauseonly").forEach(el => el.hidden = scriptVersion < 2 || mode !== "manual");
     online = true; hideStatus(); $("#gate").hidden = true; $("#app").hidden = false;
-    renderAll(); startPolling();
+    renderAll(); startPolling(); loadResPlan();
   } catch(err) {
     if (err.message !== "Passcode needed") showStatus("Couldn't load the log: " + err.message, "bad");
   }
@@ -1067,10 +1081,108 @@ function computeForecast(){
   }
   return {lines, labor, printer, missing, D};
 }
+// ---------- yesterday's results ----------
+const goalPct = () => Number(config?.productivityGoal) || 95;
+let resPlan = null, resPlanFor = null;   // planned units from the day report sent for the results date
+function prevWorkday(d){
+  let x = addDays(d, -1);
+  if ((config?.workdaysPerWeek || 5) <= 5) while (x.getDay() === 0 || x.getDay() === 6) x = addDays(x, -1);
+  return x;
+}
+function workedFor(date){ try { return JSON.parse(localStorage.getItem("prt.worked." + date) || "{}") || {}; } catch { return {}; } }
+function saveWorked(date, obj){ try { localStorage.setItem("prt.worked." + date, JSON.stringify(obj)); } catch {} }
+function computeResults(date){
+  const worked = workedFor(date), techs = {}, steps = {}, unrated = {};
+  const tech = n => techs[n] ||= { name: n, worked: Number(worked[n]) || 0, logged: 0, earned: 0 };
+  for (const e of finished().filter(e => e.date === date && e.kind !== "machine")) {
+    const p = prod(e.productId), s = step(e.productId, e.stepId); if (!p || !s || s.kind === "machine") continue;
+    const h = hoursOf(e), t = tech(e.employee || "No name");
+    t.logged += h;
+    let earned = 0;
+    if (p.overhead) earned = h;                                         // maintenance, clean-up: credited at time logged
+    else if (Number(e.qty) > 0 && Number(s.est) > 0) earned = Number(e.qty) / Number(s.est);
+    else if (Number(e.qty) > 0 || h > 0) { const k = p.id + "|" + s.id; (unrated[k] ||= { product: p.name, step: s.name, units: 0 }).units += Number(e.qty) || 0; }
+    t.earned += earned;
+    if (earned > 0) { const k = p.id + "|" + s.id; const r = steps[k] ||= { product: p.name, step: p.overhead ? s.name + " (at time logged)" : s.name, units: p.overhead ? null : 0, earned: 0 }; r.earned += earned; if (!p.overhead) r.units += Number(e.qty) || 0; }
+  }
+  for (const n of (config?.employees || [])) tech(n);
+  for (const n of Object.keys(worked)) if (Number(worked[n])) tech(n);
+  // order by time logged, never by hours worked, so rows stay put while someone types
+  const list = Object.values(techs).sort((a, b) => b.logged - a.logged || a.name.localeCompare(b.name));
+  const done = finished().filter(e => e.date === date);
+  const prods = products().filter(p => !p.overhead && p.completeStep).map(p => ({ id: p.id, name: p.name,
+    finished: done.filter(e => e.productId === p.id && e.stepId === p.completeStep).reduce((a, e) => a + (Number(e.qty) || 0), 0),
+    planned: resPlan && resPlanFor === date ? (Number(resPlan[p.id]) || null) : null }))
+    .filter(x => x.finished || x.planned);
+  const sum = k => list.reduce((a, t) => a + t[k], 0);
+  return { date, techs: list, worked: sum("worked"), logged: sum("logged"), earned: sum("earned"), products: prods,
+    steps: Object.values(steps).sort((a, b) => b.earned - a.earned), unrated: Object.values(unrated) };
+}
+const pctText = v => v == null || !isFinite(v) ? "—" : Math.round(v * 100) + "%";
+const pctPill = v => v == null || !isFinite(v) ? `<span class="note">—</span>` : `<span class="pill ${v * 100 >= goalPct() ? "good" : "bad"}">${pctText(v)}</span>`;
+function renderResults(){
+  const date = $("#resDate").value; if (!date) return;
+  const R = computeResults(date), prodty = R.worked ? R.earned / R.worked : null, g = goalPct();
+  const label = parseYmd(date).toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" });
+  $("#resKpis").innerHTML = [
+    [prodty == null ? "—" : pctText(prodty), "Productivity", prodty == null ? `Goal ${g}% · enter hours worked` : `Goal ${g}% · ${prodty * 100 >= g ? "met" : "below goal"}`, prodty == null ? "" : prodty * 100 >= g ? "var(--good)" : "var(--bad)"],
+    [fmtNum(R.earned, 2), "Earned hours", "Work finished, at standard times", ""],
+    [R.worked ? fmtNum(R.worked, 2) : "—", "Hours worked", `${fmtNum(R.logged, 2)} logged on timers`, ""],
+    [R.worked ? fmtNum(Math.max(0, R.worked - R.logged), 2) : "—", "Not logged", "Worked but not on any task", ""]
+  ].map(([v,l,sub,c]) => `<div class="kpi"${c ? ` style="border-left-color:${c}"` : ""}><span class="l">${l}</span><span class="v"${c ? ` style="color:${c}"` : ""}>${v}</span><span class="s">${esc(sub)}</span></div>`).join("");
+  // tech table: keep the inputs while someone is typing in them
+  const typing = $("#resTechs").contains(document.activeElement);
+  if (!typing || $("#resTechs").dataset.date !== date || $("#resTechs").dataset.names !== R.techs.map(t => t.name).join("|")) {
+    $("#resTechs").dataset.date = date; $("#resTechs").dataset.names = R.techs.map(t => t.name).join("|");
+    $("#resTechs").innerHTML = !R.techs.length ? `<tbody><tr><td><div class="empty">Add employees in Setup to enter hours worked.</div></td></tr></tbody>` :
+      `<thead><tr><th>Tech</th><th class="n">Worked</th><th class="n">Logged</th><th class="n">Earned</th><th class="n">Productivity</th></tr></thead><tbody>` +
+      R.techs.map((t, i) => `<tr><td>${esc(t.name)}</td><td class="n"><input type="number" min="0" max="24" step="0.25" inputmode="decimal" id="rw-${i}" data-worked="${esc(t.name)}" value="${t.worked || ""}" placeholder="0" style="width:84px;text-align:right" aria-label="Hours worked by ${esc(t.name)}"></td><td class="n" id="rl-${i}"></td><td class="n" id="re-${i}"></td><td class="n" id="rp-${i}"></td></tr>`).join("") +
+      `<tr class="total"><td>Department</td><td class="n" id="rw-total"></td><td class="n" id="rl-total"></td><td class="n" id="re-total"></td><td class="n" id="rp-total"></td></tr></tbody>`;
+  }
+  R.techs.forEach((t, i) => { const set = (id, h) => { const el = document.getElementById(id); if (el) el.innerHTML = h; };
+    set(`rl-${i}`, fmtNum(t.logged, 2)); set(`re-${i}`, fmtNum(t.earned, 2)); set(`rp-${i}`, pctPill(t.worked ? t.earned / t.worked : null)); });
+  if ($("#rw-total")) { $("#rw-total").textContent = fmtNum(R.worked, 2); $("#rl-total").textContent = fmtNum(R.logged, 2); $("#re-total").textContent = fmtNum(R.earned, 2); $("#rp-total").innerHTML = pctPill(prodty); }
+  const anyPlan = R.products.some(x => x.planned != null);
+  $("#resProducts").innerHTML = !R.products.length ? `<tbody><tr><td><div class="empty">Nothing finished at Ship or Package on ${esc(label)}.</div></td></tr></tbody>` :
+    `<thead><tr><th>Product</th>${anyPlan ? `<th class="n">Planned</th>` : ""}<th class="n">Finished</th></tr></thead><tbody>` +
+    R.products.map(x => `<tr><td><span class="sw" style="background:${colorVar(prod(x.id))}"></span>${esc(x.name)}</td>${anyPlan ? `<td class="n">${x.planned == null ? "—" : fmtNum(x.planned)}</td>` : ""}<td class="n"><b>${fmtNum(x.finished)}</b></td></tr>`).join("") + `</tbody>`;
+  $("#resSteps").innerHTML = !R.steps.length ? `<tbody><tr><td><div class="empty">No hands-on work logged on ${esc(label)}.</div></td></tr></tbody>` :
+    `<thead><tr><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Earned hrs</th></tr></thead><tbody>` +
+    R.steps.slice(0, 10).map(x => `<tr><td>${esc(x.product)}</td><td>${esc(x.step)}</td><td class="n">${x.units == null ? "—" : fmtNum(x.units)}</td><td class="n">${fmtNum(x.earned, 2)}</td></tr>`).join("") + `</tbody>`;
+  $("#resUnrated").textContent = R.unrated.length ? `No target in Setup yet, so these earned nothing: ${R.unrated.map(u => `${u.product} · ${u.step}${u.units ? ` (${fmtNum(u.units)})` : ""}`).join(", ")}.` : "";
+}
+async function loadResPlan(){
+  const date = $("#resDate").value; resPlan = null; resPlanFor = date;
+  if (!online || scriptVersion < 5 || !date) return;
+  try { const d = await api({ action: "getPlan", date }); if (resPlanFor === date) { resPlan = d.plan || null; renderResults(); } } catch {}
+}
+function resultsForReport(){
+  const date = $("#resDate").value; if (!date) return null;
+  const R = computeResults(date);
+  if (!R.worked && !R.earned && !R.products.length) return null;
+  return { label: parseYmd(date).toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" }), goal: goalPct(),
+    worked: R.worked, earned: R.earned, logged: R.logged,
+    techs: R.techs.filter(t => t.worked || t.earned || t.logged).map(t => ({ name: t.name, worked: t.worked, earned: t.earned, logged: t.logged })),
+    products: R.products.map(x => ({ name: x.name, finished: x.finished, planned: x.planned })),
+    steps: R.steps.slice(0, 10).map(x => ({ product: x.product, step: x.step, units: x.units, earned: x.earned })),
+    unrated: R.unrated.slice(0, 12) };
+}
+$("#resTechs").addEventListener("input", ev => {
+  const name = ev.target.dataset.worked; if (name == null) return;
+  const date = $("#resDate").value, w = workedFor(date);
+  if (ev.target.value === "") delete w[name]; else w[name] = Math.min(24, Math.max(0, Number(ev.target.value) || 0));   // a typo can't add a 85-hour day
+  saveWorked(date, w); renderResults();
+  if (!$("#emailPanel").hidden) openEmailPanel();
+});
+$("#resDate").addEventListener("change", () => { renderResults(); loadResPlan(); if (!$("#emailPanel").hidden) openEmailPanel(); });
+
 function renderForecast(){
   $("#fcInputs").innerHTML = `<thead><tr><th>Product</th><th class="n">Planned units</th><th>Oldest order</th><th class="n">Waiting</th><th class="n">Avg / ${fcPeriod}</th></tr></thead><tbody>` +
     products().filter(p=>!p.overhead).map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td><td class="n"><input type="number" min="0" step="1" inputmode="numeric" id="fc-${esc(p.id)}" data-fc="${esc(p.id)}" value="${fcPlan[p.id] ?? ""}" style="width:90px;text-align:right" aria-label="Planned units for ${esc(p.name)}"></td><td><input type="date" id="fco-${esc(p.id)}" data-fco="${esc(p.id)}" value="${esc(fcOldest[p.id] || "")}" max="${esc($("#fcDate").value || todayStr())}" style="width:150px" aria-label="Oldest order date for ${esc(p.name)}"></td><td class="n" id="fcw-${esc(p.id)}">${waitingHTML(p.id)}</td><td class="n">${fmtNum(avgVolume(p))}</td></tr>`).join("") + `</tbody>`;
   renderForecastOut();
+  $("#resSection").hidden = fcPeriod !== "day";
+  $("#fcTodayHead").textContent = fcPeriod === "day" ? "Today's forecast" : `Forecast for the ${fcPeriod}`;
+  if (fcPeriod === "day") renderResults();
 }
 // Calendar days from the oldest open order to the day the report is for.
 function daysWaiting(pid){
@@ -1116,6 +1228,7 @@ $$("[data-period]").forEach(b => b.addEventListener("click", () => { fcPeriod=b.
 
 // ---- emailed report ----
 $("#fcDate").value = todayStr();
+$("#resDate").value = ymd(prevWorkday(new Date()));
 function reportLabel(){
   const d = parseYmd($("#fcDate").value || todayStr());
   if (fcPeriod === "day") return d.toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric" });
@@ -1138,7 +1251,10 @@ function buildReport(){
       return { name: p.name, units, oldest, daysWaiting: d };
     }),
     steps: f.lines.filter(l => l.hours).map(l => ({ product: l.p.name, step: l.s.name, units: l.units, hours: l.hours, printer: l.s.kind === "machine" })),
-    sentBy: $("#emailBy").value || "", note: $("#emailNote").value.trim(), pageUrl
+    sentBy: $("#emailBy").value || "", note: $("#emailNote").value.trim(), pageUrl,
+    date: $("#fcDate").value || todayStr(),
+    plan: fcPeriod === "day" ? Object.fromEntries(products().filter(p => !p.overhead && Number(fcPlan[p.id]) > 0).map(p => [p.id, Number(fcPlan[p.id])])) : {},
+    results: fcPeriod === "day" && scriptVersion >= 5 ? resultsForReport() : null
   };
 }
 function openEmailPanel(){
@@ -1146,7 +1262,9 @@ function openEmailPanel(){
   const f = computeForecast();
   $("#emailTitle").textContent = `Email the ${fcPeriod} forecast for ${reportLabel()}`;
   const worst = products().filter(p => !p.overhead && daysWaiting(p.id) != null).sort((x,y) => daysWaiting(y.id) - daysWaiting(x.id))[0];
-  $("#emailSub").textContent = list.length ? `${fmtH(f.labor)} labor hours · ${fmtNum(units)} planned units${worst ? ` · furthest behind: ${worst.name}, ${daysWaiting(worst.id)} days` : ""} · goes to ${list.length} ${list.length>1?"people":"person"}:` : "";
+  const RR = fcPeriod === "day" ? resultsForReport() : null;
+  const yTxt = RR ? ` · yesterday ${RR.worked ? pctText(RR.earned / RR.worked) + " productivity" : "results (no hours worked entered)"}` : "";
+  $("#emailSub").textContent = list.length ? `${fmtH(f.labor)} labor hours · ${fmtNum(units)} planned units${yTxt}${worst ? ` · furthest behind: ${worst.name}, ${daysWaiting(worst.id)} days` : ""} · goes to ${list.length} ${list.length>1?"people":"person"}:` : "";
   $("#emailTo").innerHTML = list.map(e => `<span class="chipx" style="padding-right:10px">${esc(e)}</span>`).join("");
   const emps = config?.employees || [], cur = $("#emailBy").value || store.get("prt.emp") || "";
   $("#emailBy").innerHTML = opt("", "—") + emps.map(n => opt(n, n, n === cur)).join("");
@@ -1154,6 +1272,8 @@ function openEmailPanel(){
   if (scriptVersion < 3) warn = "Emailing needs the updated sheet script. Ask the tracker owner to redeploy it.";
   else if (!list.length) warn = "No one is on the email list yet. Add addresses on the Setup tab under Forecast email list.";
   else if (!units) warn = "Enter planned units first. The report would show only overhead hours.";
+  else if (fcPeriod === "day" && scriptVersion < 5) warn = "Yesterday's results need the updated sheet script, so this report will go without them.";
+  else if (fcPeriod === "day" && RR && !RR.worked) warn = "No hours worked entered for yesterday, so productivity will show as —. Enter them under Yesterday's results.";
   $("#emailWarn").textContent = warn; $("#emailWarn").hidden = !warn;
   $("#btnSendEmail").disabled = !!warn && (scriptVersion < 3 || !list.length);
   $("#emailMsg").textContent = ""; $("#emailMsg").style.color = "";
@@ -1194,7 +1314,7 @@ function renderSetup(){
   $("#printerRows").innerHTML = draft.printers.map((p,i)=>`<div class="row"><label class="f" style="flex:2">Name<input type="text" id="pr-n-${i}" data-pr="${i}" data-k="name" value="${esc(p.name)}"></label><label class="f" style="flex:1">Hours / day<input type="number" min="0" max="24" step="0.5" id="pr-h-${i}" data-pr="${i}" data-k="hoursPerDay" value="${p.hoursPerDay}"></label><button class="link" type="button" data-rm-pr="${i}" style="color:var(--bad);padding-bottom:10px">Remove</button></div>`).join("");
   const mails = draft.reportEmails || [];
   $("#mailChips").innerHTML = mails.length ? mails.map((n,i)=>`<span class="chipx">${esc(n)}<button type="button" aria-label="Remove ${esc(n)}" data-rm-mail="${i}">×</button></span>`).join("") : `<span class="note">No one yet.</span>`;
-  $("#setHrs").value = draft.productiveHoursPerPerson; $("#setDays").value = draft.workdaysPerWeek;
+  $("#setHrs").value = draft.productiveHoursPerPerson; $("#setDays").value = draft.workdaysPerWeek; $("#setGoal").value = draft.productivityGoal ?? 95;
   if (!renderSetup.opened && draft.products[0]) { openProducts.add(draft.products[0].id); renderSetup.opened = true; }
   $("#prodEditor").innerHTML = draft.products.map((p,pi) => `<details data-prod="${esc(p.id)}" ${openProducts.has(p.id)?"open":""}><summary><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)} <span class="note">· ${p.steps.length} steps</span></summary>
     <div class="tablewrap" style="margin-top:8px"><table class="stepgrid"><thead><tr><th>Order</th><th>Step</th><th>Kind</th><th title="Ask the tech which printer this was for">Printer?</th><th class="n">${p.overhead?"Hours / day":"Target / hr"}</th>${p.overhead?"":`<th class="n">Share</th><th>Counts volume</th>`}<th></th></tr></thead><tbody>
@@ -1268,6 +1388,7 @@ $("#view-setup").addEventListener("input", ev => {
   else if (t.dataset.req != null) { draft.products[+t.dataset.req].distributorRequired = t.checked; markDirty(); }
   else if (t.id==="setHrs") { draft.productiveHoursPerPerson = Number(t.value)||6.5; markDirty(); }
   else if (t.id==="setDays") { draft.workdaysPerWeek = Number(t.value)||5; markDirty(); }
+  else if (t.id==="setGoal") { draft.productivityGoal = Number(t.value)||95; markDirty(); }
 });
 $("#view-setup").addEventListener("click", ev => {
   const d = ev.target.dataset; if (!draft) return;
@@ -1314,7 +1435,7 @@ function renderAll(){
   if (view==="log") { renderTimers(); renderLog(); }
   else if (view==="dashboard") renderDashboard();
   else if (view==="timestudy") renderTimeStudy();
-  else if (view==="forecast") { if (document.activeElement?.dataset?.fc) renderForecastOut(); else renderForecast(); }
+  else if (view==="forecast") { if (document.activeElement?.dataset?.fc) renderForecastOut(); else if ($("#resTechs").contains(document.activeElement)) renderResults(); else renderForecast(); }
   else if (view==="setup" && !(setupDirty && $("#view-setup").contains(document.activeElement))) renderSetup();
 }
 $("#gateForm").addEventListener("submit", async ev => {

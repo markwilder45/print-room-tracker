@@ -41,6 +41,18 @@ replies go to that account. Recipients always come from the saved list, never fr
 - After pasting a script version that adds email, run `authorizeEmail` once from the Apps Script editor and
   approve the "send email as you" permission, then deploy a new version.
 
+## Yesterday's results and productivity
+
+The Forecast tab's Day view starts with Yesterday's results. The tech types each person's hours worked from the
+timeclock; everything else comes from the floor log for that date.
+
+- **Earned hours:** for each hands-on step, units completed ÷ that step's target rate in Setup. Printer steps are
+  left out. Maintenance and clean-up are credited at the time logged. Steps with no target earn nothing and are listed.
+- **Productivity:** earned hours ÷ hours worked, per tech and for the department. The goal (95% by default) is set
+  on Setup. Targets are the standard, so only managers should change them or use "Use actual".
+- **Planned vs finished:** each day report stores its planned units on the `Reports` tab (`reportDate`, `plan`),
+  and the next day's results compare finished units against them. Needs script version 5.
+
 ## Raw data
 
 The `Entries` tab has one row per task: date, start, end (epoch ms plus readable times), minutes, employee,

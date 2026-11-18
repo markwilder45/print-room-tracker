@@ -11,7 +11,7 @@
  */
 
 const PASSCODE = 'CHANGE-ME';   // change here to rotate; redeploy after changing
-const SCRIPT_VERSION = 4;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates in reports
+const SCRIPT_VERSION = 5;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans
 const MAX_RECIPIENTS = 25;          // per report
 const MAX_REPORTS_PER_DAY = 20;     // guards the Gmail sending quota
 const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt'];
@@ -37,6 +37,7 @@ function handle_(req) {
       case 'resume':     return json_(withLock_(() => resume_(req.id, Number(req.at))));
       case 'saveConfig': return json_(withLock_(() => saveConfig_(req.config)));
       case 'emailReport': return json_(withLock_(() => emailReport_(req.report)));
+      case 'getPlan':     return json_(getPlan_(String(req.date || '')));
       case 'ping':       return json_({ ok: true, serverTime: Date.now(), scriptVersion: SCRIPT_VERSION });
       default:           return json_({ ok: false, error: 'Unknown action' });
     }
@@ -210,9 +211,14 @@ function emailReport_(r) {
   const steps = (Array.isArray(r.steps) ? r.steps : []).slice(0, 120).map(x => ({ product: str_(x.product, 60), step: str_(x.step, 80), units: x.units == null ? null : Number(x.units), hours: Number(x.hours) || 0, printer: !!x.printer }));
   const labor = Number(r.laborHours) || 0, people = Number(r.peopleNeeded) || 0, printer = Number(r.printerHours) || 0, cap = Number(r.printerCapacity) || 0;
   const hpp = Number(r.hoursPerPerson) || 0, missing = Number(r.missingSteps) || 0;
+  const res = parseResults_(r.results);
   const sentBy = str_(r.sentBy, 60), note = str_(r.note, 500), pageUrl = /^https:\/\/[a-z0-9.-]+\.github\.io\//i.test(String(r.pageUrl || '')) ? String(r.pageUrl).slice(0, 200) : '';
 
-  const subject = 'Print room forecast, ' + label + ': ' + hrs_(labor) + ' labor hours' + (behind ? ' · oldest order ' + behind.days + (behind.days === 1 ? ' day' : ' days') : '');
+  const pct_ = v => v == null ? '—' : Math.round(v * 100) + '%';
+  const subject = (res && res.productivity != null
+      ? 'Print room, ' + label + ': yesterday ' + pct_(res.productivity) + ' productivity (goal ' + res.goal + '%) · today ' + hrs_(labor) + ' labor hours'
+      : 'Print room forecast, ' + label + ': ' + hrs_(labor) + ' labor hours')
+    + (behind ? ' · oldest order ' + behind.days + (behind.days === 1 ? ' day' : ' days') : '');
   const daysTxt = d => d == null ? '' : d === 0 ? 'today' : d + (d === 1 ? ' day' : ' days');
   const ink = '#132029', muted = '#5a6873', line = '#d6dee5', accent = '#0b6f93', bad = '#b0281f';
   const tile = (v, l, s) => '<td style="padding:10px 14px;border-left:3px solid ' + accent + ';vertical-align:top"><div style="font:600 11px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + '">' + l + '</div><div style="font:700 26px Arial,sans-serif;color:' + ink + '">' + v + '</div><div style="font:12px Arial,sans-serif;color:' + muted + '">' + s + '</div></td>';
@@ -222,9 +228,41 @@ function emailReport_(r) {
   const tdn = t => td(t).replace('font:14px', 'text-align:right;font:13px Consolas,Menlo,monospace;font-size:13px');
 
   let html = '<div style="max-width:640px;font-family:Arial,sans-serif;color:' + ink + '">';
-  html += '<div style="background:#132a38;color:#e9f1f6;padding:14px 18px;font:700 18px Arial,sans-serif;letter-spacing:.03em;text-transform:uppercase">Print room forecast</div>';
+  const good = '#23794a';
+  const h3 = t => '<h3 style="font:600 13px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:' + muted + ';margin:18px 0 6px">' + t + '</h3>';
+  const h2 = t => '<h2 style="font:700 16px Arial,sans-serif;color:' + ink + ';margin:22px 0 4px;padding-top:12px;border-top:2px solid ' + ink + '">' + t + '</h2>';
+  const tbl = '<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><tr>';
+  const pctCell = v => v == null ? '—' : '<span style="font-weight:700;color:' + (v * 100 >= res.goal ? good : bad) + '">' + pct_(v) + '</span>';
+  html += '<div style="background:#132a38;color:#e9f1f6;padding:14px 18px;font:700 18px Arial,sans-serif;letter-spacing:.03em;text-transform:uppercase">' + (res ? 'Print room daily report' : 'Print room forecast') + '</div>';
   html += '<p style="font:15px Arial,sans-serif;margin:16px 0 4px"><b>' + esc_(label) + '</b>' + (sentBy ? ' · sent by ' + esc_(sentBy) : '') + '</p>';
   if (note) html += '<p style="font:14px Arial,sans-serif;margin:8px 0;padding:10px 12px;background:#eef2f5;border-radius:4px">' + esc_(note).replace(/\n/g, '<br>') + '</p>';
+  if (res) {
+    html += h2('Yesterday · ' + esc_(res.label));
+    const ok = res.productivity != null && res.productivity * 100 >= res.goal;
+    html += '<table role="presentation" cellspacing="0" cellpadding="0" style="margin:10px 0;border-collapse:collapse"><tr>' +
+      tile(res.productivity == null ? '—' : '<span style="color:' + (ok ? good : bad) + '">' + pct_(res.productivity) + '</span>', 'Productivity', 'goal ' + res.goal + '%' + (res.productivity == null ? ' · no hours worked entered' : ok ? ' · met' : ' · below goal')) +
+      tile(hrs_(res.earned), 'Earned hours', 'work completed, at standard times') +
+      tile(res.worked ? hrs_(res.worked) : '—', 'Hours worked', res.worked ? hrs_(res.logged) + ' logged on timers' : '') + '</tr></table>';
+    if (res.worked && res.worked - res.logged >= 0.25) html += '<p style="font:13px Arial,sans-serif;color:' + muted + ';margin:4px 0">' + hrs_(res.worked - res.logged) + ' of the hours worked weren\'t logged on any task.</p>';
+    if (res.techs.length) {
+      html += h3('By tech') + tbl + th('Tech') + thn('Worked') + thn('Logged') + thn('Earned') + thn('Productivity') + '</tr>';
+      res.techs.forEach(t => { html += '<tr>' + td(esc_(t.name)) + tdn(t.worked ? hrs_(t.worked) : '—') + tdn(hrs_(t.logged)) + tdn(hrs_(t.earned)) + tdn(pctCell(t.worked ? t.earned / t.worked : null)) + '</tr>'; });
+      html += '</table>';
+    }
+    if (res.products.length) {
+      const anyPlan = res.products.some(p => p.planned != null);
+      html += h3('Finished') + tbl + th('Product') + (anyPlan ? thn('Planned') : '') + thn('Finished') + '</tr>';
+      res.products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + (anyPlan ? tdn(p.planned == null ? '—' : num_(p.planned)) : '') + tdn('<b>' + num_(p.finished) + '</b>') + '</tr>'; });
+      html += '</table>';
+    }
+    if (res.steps.length) {
+      html += h3('Where the time went') + tbl + th('Product') + th('Step') + thn('Units') + thn('Earned hrs') + '</tr>';
+      res.steps.forEach(x => { html += '<tr>' + td(esc_(x.product)) + td(esc_(x.step)) + tdn(x.units == null ? '—' : num_(x.units)) + tdn(hrs_(x.earned)) + '</tr>'; });
+      html += '</table>';
+    }
+    if (res.unrated.length) html += '<p style="font:13px Arial,sans-serif;color:' + muted + ';margin:8px 0">No standard time yet, so not counted in earned hours: ' + res.unrated.map(u => esc_(u.product) + ' · ' + esc_(u.step) + (u.units ? ' (' + num_(u.units) + ')' : '')).join(', ') + '.</p>';
+    html += h2("Today's forecast · " + esc_(label));
+  }
   html += '<table role="presentation" cellspacing="0" cellpadding="0" style="margin:14px 0;border-collapse:collapse"><tr>' +
     tile(hrs_(labor), 'Labor hours', 'incl. overhead') +
     tile(num_(people, 1), 'People needed', hpp ? 'at ' + num_(hpp, 2).replace(/\.?0+$/, '') + ' productive hrs each' : '') +
@@ -247,6 +285,12 @@ function emailReport_(r) {
 
   let text = 'Print room forecast, ' + label + (sentBy ? ' (sent by ' + sentBy + ')' : '') + '\n\n';
   if (note) text += note + '\n\n';
+  if (res) {
+    text += 'YESTERDAY · ' + res.label + '\nProductivity: ' + pct_(res.productivity) + ' (goal ' + res.goal + '%)\nEarned hours: ' + hrs_(res.earned) + '\nHours worked: ' + (res.worked ? hrs_(res.worked) : '—') + ' (' + hrs_(res.logged) + ' logged)\n';
+    if (res.techs.length) text += res.techs.map(t => '  ' + t.name + ': worked ' + (t.worked ? hrs_(t.worked) : '—') + ', earned ' + hrs_(t.earned) + ', ' + pct_(t.worked ? t.earned / t.worked : null)).join('\n') + '\n';
+    if (res.products.length) text += 'Finished\n' + res.products.map(p => '  ' + p.name + ': ' + num_(p.finished) + (p.planned != null ? ' of ' + num_(p.planned) + ' planned' : '')).join('\n') + '\n';
+    text += '\nTODAY · ' + label + '\n';
+  }
   text += 'Labor hours: ' + hrs_(labor) + ' (incl. overhead)\nPeople needed: ' + num_(people, 1) + '\nPrinter hours: ' + (printer ? hrs_(printer) : '—') + (cap ? ' of ' + hrs_(cap) + ' available' : '') + '\n\n';
   if (behind) text += 'Furthest behind: ' + behind.name + ', oldest order ' + behind.oldest + ' (' + daysTxt(behind.days) + ' waiting)\n\n';
   if (products.length) text += 'Planned units\n' + products.map(p => '  ' + p.name + ': ' + (p.units ? num_(p.units) : '—') + (p.oldest ? '  · oldest order ' + p.oldest + ' (' + daysTxt(p.days) + ')' : '')).join('\n') + '\n\n';
@@ -258,9 +302,41 @@ function emailReport_(r) {
   // keep a record of what went out
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let log = ss.getSheetByName('Reports');
-  if (!log) { log = ss.insertSheet('Reports'); log.getRange(1, 1, 1, 8).setValues([['sentAt','report','period','laborHours','peopleNeeded','printerHours','sentBy','recipients']]).setFontWeight('bold'); log.setFrozenRows(1); }
-  log.appendRow([new Date(), label, period, Math.round(labor * 10) / 10, Math.round(people * 10) / 10, Math.round(printer * 10) / 10, sentBy, list.join(', ')]);
+  if (!log) { log = ss.insertSheet('Reports'); log.setFrozenRows(1); }
+  if (log.getLastColumn() < REPORT_COLS.length) log.getRange(1, 1, 1, REPORT_COLS.length).setValues([REPORT_COLS]).setFontWeight('bold');
+  const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(String(r.date || '')) ? String(r.date) : '';
+  const plan = {};
+  if (r.plan && typeof r.plan === 'object') Object.keys(r.plan).slice(0, 40).forEach(k => { const n = Number(r.plan[k]); if (k.length <= 40 && isFinite(n) && n > 0) plan[k] = n; });
+  log.appendRow([new Date(), label, period, Math.round(labor * 10) / 10, Math.round(people * 10) / 10, Math.round(printer * 10) / 10, sentBy, list.join(', '),
+    reportDate, JSON.stringify(plan), res ? JSON.stringify({ date: res.label, productivity: res.productivity, earned: res.earned, worked: res.worked, logged: res.logged, techs: res.techs }) : '']);
   return { ok: true, sentTo: list.length };
+}
+
+const REPORT_COLS = ['sentAt','report','period','laborHours','peopleNeeded','printerHours','sentBy','recipients','reportDate','plan','yesterday'];
+
+function parseResults_(x) {
+  if (!x || typeof x !== 'object') return null;
+  const n = v => { const k = Number(v); return isFinite(k) && k >= 0 ? k : 0; };
+  const goal = Math.min(200, Math.max(1, Number(x.goal) || 95));
+  const techs = (Array.isArray(x.techs) ? x.techs : []).slice(0, 30).map(t => ({ name: str_(t.name, 60), worked: n(t.worked), earned: n(t.earned), logged: n(t.logged) })).filter(t => t.name && (t.worked || t.earned || t.logged));
+  const products = (Array.isArray(x.products) ? x.products : []).slice(0, 30).map(p => ({ name: str_(p.name, 60), finished: n(p.finished), planned: p.planned == null || p.planned === '' ? null : n(p.planned) })).filter(p => p.name && (p.finished || p.planned));
+  const steps = (Array.isArray(x.steps) ? x.steps : []).slice(0, 12).map(s => ({ product: str_(s.product, 60), step: str_(s.step, 80), units: s.units == null ? null : n(s.units), earned: n(s.earned) })).filter(s => s.earned > 0);
+  const unrated = (Array.isArray(x.unrated) ? x.unrated : []).slice(0, 12).map(s => ({ product: str_(s.product, 60), step: str_(s.step, 80), units: n(s.units) }));
+  const worked = n(x.worked), earned = n(x.earned), logged = n(x.logged);
+  return { label: str_(x.label, 60), goal: goal, worked: worked, earned: earned, logged: logged, productivity: worked > 0 ? earned / worked : null, techs: techs, products: products, steps: steps, unrated: unrated };
+}
+
+// The planned units from the last day report sent for a given date, so the next day's report can compare plan to actual.
+function getPlan_(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: true, plan: null };
+  const log = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Reports');
+  if (!log || log.getLastRow() < 2 || log.getLastColumn() < REPORT_COLS.length) return { ok: true, plan: null };
+  const rows = log.getRange(2, 1, log.getLastRow() - 1, REPORT_COLS.length).getValues();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const d = rows[i][8] instanceof Date ? Utilities.formatDate(rows[i][8], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(rows[i][8]);
+    if (rows[i][2] === 'day' && d === date) { try { return { ok: true, plan: JSON.parse(rows[i][9] || '{}'), sentAt: rows[i][0] instanceof Date ? rows[i][0].getTime() : null }; } catch (e) { return { ok: true, plan: null }; } }
+  }
+  return { ok: true, plan: null };
 }
 
 /** Run once from the editor after pasting this version, to allow the script to send email as you. */
