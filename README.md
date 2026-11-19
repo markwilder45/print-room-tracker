@@ -67,6 +67,7 @@ timeclock; everything else comes from the floor log for that date.
   to today's labor hours, labelled "carried over". Planned units are new work only. Started vs shipped per product is
   in the report (script version 8).
 - **Output vs target:** the work finished at target pace divided by hours worked, with units done vs expected per step.
+- **Rates:** the forecast uses each step's Setup target; the measured pace is only used for a step with no target.
 - **Orders-per-hour targets:** on Setup, a product's finishing step can set "Target counts" to Orders. Its target is
   then orders per hour; the forecast uses planned orders (typed, or estimated from units at the product's usual units
   per order), and output vs target and the time study measure that step in orders.

@@ -1136,8 +1136,9 @@ function computeForecast(){
       const machine = s.kind === "machine";
       const measuredShare = null;   // learned ratios are off: every step forecasts the planned units unless Setup sets a share
       const share = measuredShare ?? (s.share ?? 1);
-      const rate = machine ? (Number(s.est) || null) : (r && r.n>=3 && r.rate ? r.rate : s.est || null);
-      const src = machine ? (s.est ? "printer log" : "missing") : (r && r.n>=3 && r.rate ? "actual" : s.est ? "target" : "missing");
+      // Setup targets are the standard; measured pace is only used for steps that have no target yet
+      const rate = machine ? (Number(s.est) || null) : (Number(s.est) || (r && r.n>=3 && r.rate ? r.rate : null));
+      const src = machine ? (s.est ? "printer log" : "missing") : (Number(s.est) ? "target" : r && r.n>=3 && r.rate ? "actual" : "missing");
       const base = perOrder(s) ? plannedOrders(p) : U;   // per-order steps forecast from orders
       const hours = rate ? base*share/rate : null;
       if (hours==null && share>0) missing++;
@@ -1250,11 +1251,11 @@ function carryLines(c){
   const p = prod(c.id), stages = wipStages(p), { by } = rates(90), lines = [];
   for (const w of c.waiting) for (const st of stages.slice(w.index)) {
     const r = by[p.id + "|" + st.id];
-    const rate = r && r.n >= 3 && r.rate ? r.rate : Number(st.est) || null;
+    const rate = Number(st.est) || (r && r.n >= 3 && r.rate ? r.rate : null);
     const units = perOrder(st) ? Math.ceil(w.units / unitsPerOrder(p)) : w.units;
     const ex = lines.find(l => l.s.id === st.id);
     if (ex) { ex.units += units; ex.hours = ex.rate ? ex.units / ex.rate : null; }
-    else lines.push({ p, s: st, units, rate, src: r && r.n >= 3 && r.rate ? "actual" : rate ? "target" : "missing", hours: rate ? units / rate : null, orders: perOrder(st), pending: true });
+    else lines.push({ p, s: st, units, rate, src: Number(st.est) ? "target" : rate ? "actual" : "missing", hours: rate ? units / rate : null, orders: perOrder(st), pending: true });
   }
   return lines;
 }
@@ -1394,7 +1395,7 @@ function renderForecastOut(){
     <div class="kpi"><span class="l">Printer hours</span><span class="v">${f.printer?fmtH(f.printer):"—"}</span><span class="s">${capPrinter?`of ${fmtH(capPrinter)} available`:"Add printers in Setup"}</span></div></div>
     ${f.pools.map(pl => { const u = pl.cap ? pl.hours / pl.cap : null; return `<div class="section" style="gap:6px"><div class="head"><span class="note"><b style="color:var(--ink)">${esc(pl.label)}</b> · ${esc(pl.products.join(", "))}</span><span class="mono">${fmtNum(pl.hours,2)} of ${pl.cap ? fmtNum(pl.cap,1) : "0"} h${u!=null ? ` · ${fmtNum(u*100)}%` : ""}</span></div><div class="meter"><i class="${u==null||u>1?"over":""}" style="width:${u==null?100:Math.min(100,u*100)}%"></i></div></div>`; }).join("")}
     ${f.pools.filter(pl => !pl.cap || pl.hours > pl.cap).map(pl => `<div class="banner bad">${esc(pl.label)} ${pl.cap ? `is over capacity: ${fmtNum(pl.hours,1)} hours of printing against ${fmtNum(pl.cap,1)} available. That printer, not staffing, sets the pace for ${esc(pl.products.join(", "))}.` : `has no hours available in Setup, but ${esc(pl.products.join(", "))} need${pl.products.length>1?"":"s"} ${fmtNum(pl.hours,1)} hours of printing on it.`}</div>`).join("")}
-    ${f.missing ? `<div class="banner warn">${f.missing} step${f.missing>1?"s have":" has"} no target and not enough logged time, so ${f.missing>1?"they're":"it's"} left out. Log a few entries for ${f.missing>1?"them":"it"} or add a target in Setup.</div>` : ""}
+    ${f.missing ? `<div class="banner warn">${f.missing} step${f.missing>1?"s have":" has"} no target, so ${f.missing>1?"they're":"it's"} left out. Add a target in Setup (or log a few entries and the measured pace is used until then).</div>` : ""}
     ${!Object.values(fcPlan).some(Number) ? `<div class="empty">Enter planned units, or fill from the last 4 weeks. Overhead is already included.</div>`:""}`;
   const L = f.lines.filter(l => l.hours || l.src==="missing");
   $("#fcSteps").innerHTML = !L.length ? `<tbody><tr><td><div class="empty">The breakdown appears once there are planned units.</div></td></tr></tbody>` :
