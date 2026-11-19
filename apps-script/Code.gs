@@ -11,7 +11,7 @@
  */
 
 const PASSCODE = 'CHANGE-ME';   // change here to rotate; redeploy after changing
-const SCRIPT_VERSION = 6;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans, 6 = orders at ship, carry-over, output vs target
+const SCRIPT_VERSION = 7;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans, 6 = orders at ship, carry-over, output vs target, 7 = printer load per printer group
 const MAX_RECIPIENTS = 25;          // per report
 const MAX_REPORTS_PER_DAY = 20;     // guards the Gmail sending quota
 const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt','orders'];
@@ -213,6 +213,7 @@ function emailReport_(r) {
   const steps = (Array.isArray(r.steps) ? r.steps : []).slice(0, 120).map(x => ({ product: str_(x.product, 60), step: str_(x.step, 80), units: x.units == null ? null : Number(x.units), hours: Number(x.hours) || 0, printer: !!x.printer }));
   const labor = Number(r.laborHours) || 0, people = Number(r.peopleNeeded) || 0, printer = Number(r.printerHours) || 0, cap = Number(r.printerCapacity) || 0;
   const hpp = Number(r.hoursPerPerson) || 0, missing = Number(r.missingSteps) || 0;
+  const pools = (Array.isArray(r.printerPools) ? r.printerPools : []).slice(0, 10).map(x => ({ name: str_(x.name, 80), products: str_(x.products, 160), hours: Number(x.hours) || 0, cap: Number(x.cap) || 0 })).filter(x => x.name && x.hours > 0);
   const res = parseResults_(r.results);
   const sentBy = str_(r.sentBy, 60), note = str_(r.note, 500), pageUrl = /^https:\/\/[a-z0-9.-]+\.github\.io\//i.test(String(r.pageUrl || '')) ? String(r.pageUrl).slice(0, 200) : '';
 
@@ -274,7 +275,12 @@ function emailReport_(r) {
     tile(hrs_(labor), 'Labor hours', 'incl. overhead') +
     tile(num_(people, 1), 'People needed', hpp ? 'at ' + num_(hpp, 2).replace(/\.?0+$/, '') + ' productive hrs each' : '') +
     tile(printer ? hrs_(printer) : '—', 'Printer hours', cap ? 'of ' + hrs_(cap) + ' available' : '') + '</tr></table>';
-  if (cap && printer > cap) html += '<p style="font:14px Arial,sans-serif;color:' + bad + '">Printers are over capacity for this volume. The print queue, not staffing, sets the pace.</p>';
+  if (pools.length) {
+    html += '<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin:4px 0 8px"><tr>' + th('Printer') + th('Prints') + thn('Hours') + thn('Available') + '</tr>';
+    pools.forEach(x => { const over = !x.cap || x.hours > x.cap; html += '<tr>' + td(esc_(x.name)) + td(esc_(x.products)) + tdn(over ? '<b style="color:' + bad + '">' + hrs_(x.hours) + '</b>' : hrs_(x.hours)) + tdn(hrs_(x.cap)) + '</tr>'; });
+    html += '</table>';
+    pools.filter(x => !x.cap || x.hours > x.cap).forEach(x => { html += '<p style="font:14px Arial,sans-serif;color:' + bad + ';margin:4px 0">' + esc_(x.name) + ' is over capacity: ' + hrs_(x.hours) + ' hours of printing against ' + hrs_(x.cap) + ' available. That printer, not staffing, sets the pace for ' + esc_(x.products) + '.</p>'; });
+  } else if (cap && printer > cap) html += '<p style="font:14px Arial,sans-serif;color:' + bad + '">Printers are over capacity for this volume. The print queue, not staffing, sets the pace.</p>';
   if (missing) html += '<p style="font:13px Arial,sans-serif;color:' + muted + '">' + missing + ' step' + (missing > 1 ? 's have' : ' has') + ' no target yet and ' + (missing > 1 ? 'are' : 'is') + ' left out of these hours.</p>';
   if (behind) html += '<p style="font:14px Arial,sans-serif;margin:6px 0">Furthest behind: <b>' + esc_(behind.name) + '</b>, oldest order ' + esc_(behind.oldest) + ' (' + daysTxt(behind.days) + ' waiting).</p>';
   if (products.length) {
@@ -299,7 +305,9 @@ function emailReport_(r) {
     if (res.carry.length) text += 'Carried over\n' + res.carry.map(c => '  ' + c.name + ': ' + num_(c.open) + ' open' + (c.note ? ' · ' + c.note : '')).join('\n') + '\n';
     text += '\nTODAY · ' + label + '\n';
   }
-  text += 'Labor hours: ' + hrs_(labor) + ' (incl. overhead)\nPeople needed: ' + num_(people, 1) + '\nPrinter hours: ' + (printer ? hrs_(printer) : '—') + (cap ? ' of ' + hrs_(cap) + ' available' : '') + '\n\n';
+  text += 'Labor hours: ' + hrs_(labor) + ' (incl. overhead)\nPeople needed: ' + num_(people, 1) + '\nPrinter hours: ' + (printer ? hrs_(printer) : '—') + (cap ? ' of ' + hrs_(cap) + ' available' : '') + '\n';
+  if (pools.length) text += pools.map(x => '  ' + x.name + ' (' + x.products + '): ' + hrs_(x.hours) + ' of ' + hrs_(x.cap) + ' h' + (!x.cap || x.hours > x.cap ? ' · OVER CAPACITY' : '')).join('\n') + '\n';
+  text += '\n';
   if (behind) text += 'Furthest behind: ' + behind.name + ', oldest order ' + behind.oldest + ' (' + daysTxt(behind.days) + ' waiting)\n\n';
   if (products.length) text += 'Planned units\n' + products.map(p => '  ' + p.name + ': ' + (p.units ? num_(p.units) : '—') + (p.oldest ? '  · oldest order ' + p.oldest + ' (' + daysTxt(p.days) + ')' : '')).join('\n') + '\n\n';
   if (steps.length) text += 'Hours by step\n' + steps.map(x => '  ' + x.product + ' · ' + x.step + ': ' + hrs_(x.hours) + ' h').join('\n') + '\n';

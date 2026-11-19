@@ -1094,9 +1094,23 @@ function stepPlan(days=90){
   const done = {}; for (const p of products()) if (p.completeStep) done[p.id] = es.filter(e=>e.productId===p.id && isShipped(e, p)).reduce((a,e)=>a+(e.qty||0),0);
   return { by, workdays, done };
 }
+// The printers a product can be printed on (Setup → "Printed on"); none chosen means any printer.
+function printersFor(p){
+  const all = (config?.printers || []).map(x => x.name);
+  const chosen = (p?.printers || []).filter(n => all.includes(n));
+  return chosen.length ? chosen : all;
+}
+const printerHoursPerDay = names => (config?.printers || []).filter(x => names.includes(x.name)).reduce((a, x) => a + (Number(x.hoursPerDay) || 0), 0);
+function poolLabel(names){
+  if (names.length === 1) return names[0];
+  // "Epson R5070L #1, #2, #3" when the names share a model
+  const stem = names.map(n => n.replace(/\s*#?\d+$/, "")); 
+  if (stem.every(x => x === stem[0]) && stem[0]) return stem[0] + " " + names.map(n => (n.match(/#?\d+$/) || [""])[0]).join(", ");
+  return names.join(", ");
+}
 function computeForecast(){
   const {by, workdays, done} = stepPlan(90), D = periodDays();
-  const lines = []; let labor=0, printer=0, missing=0;
+  const lines = [], pools = {}; let labor=0, printer=0, missing=0;
   for (const p of products()) {
     if (p.overhead) { for (const s of p.steps) { const r=by[p.id+"|"+s.id]; const perDay = r && r.n>=3 && workdays ? r.hours/workdays : (s.perDay||0); const h=perDay*D; labor+=h; lines.push({p,s,units:null,share:null,rate:null,src:r&&r.n>=3?"actual":"setup",hours:h}); } continue; }
     const U = Number(fcPlan[p.id]||0); if (!U) continue;
@@ -1112,9 +1126,11 @@ function computeForecast(){
       if (hours==null && share>0) missing++;
       if (hours) { if (s.kind==="machine") printer+=hours; else labor+=hours; }
       lines.push({p,s,units:base*share,share,rate,src,hours,orders:perOrder(s)});
+      if (machine && hours) { const names = printersFor(p), k = names.join("|"); (pools[k] ||= { names, hours: 0, products: [] }).hours += hours; if (!pools[k].products.includes(p.name)) pools[k].products.push(p.name); }
     }
   }
-  return {lines, labor, printer, missing, D};
+  const poolList = Object.values(pools).map(x => ({ ...x, label: poolLabel(x.names), cap: printerHoursPerDay(x.names) * D }));
+  return {lines, labor, printer, missing, D, pools: poolList};
 }
 // ---------- yesterday's results ----------
 const goalPct = () => Number(config?.productivityGoal) || 95;
@@ -1320,8 +1336,8 @@ function renderForecastOut(){
     <div class="kpi"><span class="l">Labor hours</span><span class="v">${fmtH(f.labor)}</span><span class="s">incl. overhead, per ${fcPeriod}</span></div>
     <div class="kpi"><span class="l">People needed</span><span class="v">${fmtNum(people,1)}</span><span class="s">at ${hpp} productive hrs × ${f.D} day${f.D>1?"s":""}</span></div>
     <div class="kpi"><span class="l">Printer hours</span><span class="v">${f.printer?fmtH(f.printer):"—"}</span><span class="s">${capPrinter?`of ${fmtH(capPrinter)} available`:"Add printers in Setup"}</span></div></div>
-    ${util!=null && f.printer ? `<div class="section"><div class="head"><span class="note">Printer load</span><span class="mono">${fmtNum(util*100)}%</span></div><div class="meter"><i class="${util>1?"over":""}" style="width:${Math.min(100,util*100)}%"></i></div></div>`:""}
-    ${util>1 ? `<div class="banner bad">Printers are over capacity. The print queue, not staffing, sets the pace for this volume.</div>` : ""}
+    ${f.pools.map(pl => { const u = pl.cap ? pl.hours / pl.cap : null; return `<div class="section" style="gap:6px"><div class="head"><span class="note"><b style="color:var(--ink)">${esc(pl.label)}</b> · ${esc(pl.products.join(", "))}</span><span class="mono">${fmtNum(pl.hours,2)} of ${pl.cap ? fmtNum(pl.cap,1) : "0"} h${u!=null ? ` · ${fmtNum(u*100)}%` : ""}</span></div><div class="meter"><i class="${u==null||u>1?"over":""}" style="width:${u==null?100:Math.min(100,u*100)}%"></i></div></div>`; }).join("")}
+    ${f.pools.filter(pl => !pl.cap || pl.hours > pl.cap).map(pl => `<div class="banner bad">${esc(pl.label)} ${pl.cap ? `is over capacity: ${fmtNum(pl.hours,1)} hours of printing against ${fmtNum(pl.cap,1)} available. That printer, not staffing, sets the pace for ${esc(pl.products.join(", "))}.` : `has no hours available in Setup, but ${esc(pl.products.join(", "))} need${pl.products.length>1?"":"s"} ${fmtNum(pl.hours,1)} hours of printing on it.`}</div>`).join("")}
     ${f.missing ? `<div class="banner warn">${f.missing} step${f.missing>1?"s have":" has"} no target and not enough logged time, so ${f.missing>1?"they're":"it's"} left out. Log a few entries for ${f.missing>1?"them":"it"} or add a target in Setup.</div>` : ""}
     ${!Object.values(fcPlan).some(Number) ? `<div class="empty">Enter planned units, or fill from the last 4 weeks. Overhead is already included.</div>`:""}`;
   const L = f.lines.filter(l => l.hours || l.src==="missing");
@@ -1362,6 +1378,7 @@ function buildReport(){
   return {
     period: fcPeriod, label: reportLabel(),
     laborHours: f.labor, peopleNeeded: f.labor / (hpp * f.D), printerHours: f.printer, printerCapacity: cap,
+    printerPools: f.pools.map(pl => ({ name: pl.label, products: pl.products.join(", "), hours: pl.hours, cap: pl.cap })),
     hoursPerPerson: hpp, missingSteps: f.missing,
     products: products().filter(p => !p.overhead && (Number(fcPlan[p.id]) || fcOldest[p.id])).map(p => {
       const units = Number(fcPlan[p.id]) || 0, oldest = fcOldest[p.id] || null, d = daysWaiting(p.id);
@@ -1447,6 +1464,7 @@ function renderSetup(){
       <td>${s.kind==="labor" && p.completeStep===s.id ? `<select id="s-${pi}-${si}-per" data-p="${pi}" data-s="${si}" data-k="per" style="width:auto" aria-label="What the ${esc(s.name)} target counts">${opt("units","Units",!perOrder(s))}${opt("orders","Orders",perOrder(s))}</select>` : `<span class="note">units</span>`}</td>`}
       <td style="white-space:nowrap"><button class="mv" type="button" data-move="${pi}|${si}|-1" aria-label="Move ${esc(s.name)} up" ${si===0?"disabled":""}>↑</button> <button class="mv" type="button" data-move="${pi}|${si}|1" aria-label="Move ${esc(s.name)} down" ${si===p.steps.length-1?"disabled":""}>↓</button> <button class="link" type="button" data-rm-step="${pi}|${si}" style="color:var(--bad)">Remove</button></td></tr>`).join("")}
     </tbody></table></div><div class="row" style="margin-top:8px"><button class="b small" type="button" data-add-step="${pi}">Add step</button>
+    ${!p.overhead && p.steps.some(x => x.kind === "machine") && (draft.printers||[]).length ? `<div class="row" style="gap:6px 12px;align-items:center;font-size:14px"><span class="optional"><b>Printed on:</b></span>${draft.printers.map((pr, ri) => `<label class="optional" style="display:flex;gap:5px;align-items:center"><input type="checkbox" id="pp-${pi}-${ri}" data-pp="${pi}" data-printer="${esc(pr.name)}" ${(!(p.printers||[]).length || p.printers.includes(pr.name)) ? "checked" : ""} style="width:auto"> ${esc(pr.name)}</label>`).join("")}</div>` : ""}
     ${p.overhead?"":`<label class="optional" style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="rq-${pi}" data-req="${pi}" ${p.distributorRequired!==false?"checked":""} style="width:auto"> Require a distributor on the first step (${esc(p.steps[0]?.name||"none yet")})</label>`}
     </div></details>`).join("");
 }
@@ -1503,10 +1521,22 @@ $("#prodEditor").addEventListener("keydown", ev => {
 });
 $("#view-setup").addEventListener("input", ev => {
   const t = ev.target; if (!draft) return;
-  if (t.dataset.pr != null) { const p = draft.printers[+t.dataset.pr]; p[t.dataset.k] = t.dataset.k==="name" ? t.value : Number(t.value); markDirty(); }
+  if (t.dataset.pr != null) { const p = draft.printers[+t.dataset.pr];
+    if (t.dataset.k === "name") { const old = p.name; p.name = t.value; for (const pr of draft.products) if (pr.printers) pr.printers = pr.printers.map(n => n === old ? t.value : n); }
+    else p[t.dataset.k] = Number(t.value);
+    markDirty(); }
   else if (t.dataset.s != null) { const p=draft.products[+t.dataset.p], s=p.steps[+t.dataset.s], k=t.dataset.k;
     if (k==="complete") p.completeStep = s.id; else if (k==="askPrinter") s.askPrinter = t.checked; else if (k==="per") s.per = t.value === "orders" ? "orders" : undefined; else if (k==="name"||k==="kind") s[k]=t.value; else s[k] = t.value===""?null:Number(t.value); markDirty(); }
   else if (t.dataset.req != null) { draft.products[+t.dataset.req].distributorRequired = t.checked; markDirty(); }
+  else if (t.dataset.pp != null) {
+    const pr = draft.products[+t.dataset.pp], all = (draft.printers||[]).map(x => x.name);
+    const cur = new Set((pr.printers||[]).length ? pr.printers : all);
+    t.checked ? cur.add(t.dataset.printer) : cur.delete(t.dataset.printer);
+    const list = all.filter(n => cur.has(n));
+    if (!list.length) { t.checked = true; toast("Each product needs at least one printer"); return; }
+    pr.printers = list.length === all.length ? undefined : list;   // all ticked = any printer
+    markDirty();
+  }
   else if (t.id==="setHrs") { draft.productiveHoursPerPerson = Number(t.value)||6.5; markDirty(); }
   else if (t.id==="setDays") { draft.workdaysPerWeek = Number(t.value)||5; markDirty(); }
   else if (t.id==="setGoal") { draft.productivityGoal = Number(t.value)||95; markDirty(); }

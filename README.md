@@ -66,6 +66,9 @@ timeclock; everything else comes from the floor log for that date.
 - **Orders-per-hour targets:** on Setup, a product's finishing step can set "Target counts" to Orders. Its target is
   then orders per hour; the forecast uses planned orders (typed, or estimated from units at the product's usual units
   per order), and output vs target and the time study measure that step in orders.
+- **Printer groups:** on Setup, each product with a printer step lists the printers it can be printed on (none = any).
+  The forecast and the emailed report show printer load for each group against that group's hours per day, and flag
+  the group that's over capacity (script version 7 for the email table).
 - The forecast now uses the planned units at every step (the old learned step ratios are off).
 
 ## Raw data
