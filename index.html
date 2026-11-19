@@ -371,7 +371,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
         <div class="kpis" id="resKpis"></div>
         <div class="grid2">
           <div class="section"><h3>Hours worked</h3><div class="tablewrap"><table id="resTechs"></table></div><p class="note">Enter each tech's hours from the timeclock.</p><p class="note" id="resSummary"></p></div>
-          <div class="section"><h3>Shipped</h3><div class="tablewrap"><table id="resProducts"></table></div></div>
+          <div class="section"><h3>Started and shipped</h3><div class="tablewrap"><table id="resProducts"></table></div></div>
         </div>
         <div class="section" id="carrySection">
           <div class="head"><h3>Carried over</h3><span class="note" id="carryNote"></span></div>
@@ -382,7 +382,7 @@ details summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14p
       <h2 style="font-size:20px;margin-top:6px" id="fcTodayHead">Today's forecast</h2>
       <div class="grid2">
         <div class="section">
-          <h3>Planned units</h3>
+          <h3>Planned units <span class="optional" style="font-size:12px">(new work; carried-over units are added automatically)</span></h3>
           <div class="tablewrap"><table id="fcInputs"></table></div>
         </div>
         <div class="section">
@@ -1129,8 +1129,13 @@ function computeForecast(){
       if (machine && hours) { const names = printersFor(p), k = names.join("|"); (pools[k] ||= { names, hours: 0, products: [] }).hours += hours; if (!pools[k].products.includes(p.name)) pools[k].products.push(p.name); }
     }
   }
+  // day forecast: finish yesterday's carried-over units too
+  let carryHours = 0;
+  if (fcPeriod === "day" && $("#resDate")?.value) for (const c of computeCarry($("#resDate").value)) for (const l of carryLines(c)) {
+    lines.push(l); if (l.hours) { labor += l.hours; carryHours += l.hours; } else missing++;
+  }
   const poolList = Object.values(pools).map(x => ({ ...x, label: poolLabel(x.names), cap: printerHoursPerDay(x.names) * D }));
-  return {lines, labor, printer, missing, D, pools: poolList};
+  return {lines, labor, printer, missing, D, pools: poolList, carryHours};
 }
 // ---------- yesterday's results ----------
 const goalPct = () => Number(config?.productivityGoal) || 95;
@@ -1173,35 +1178,70 @@ function computeResults(date){
     const shipped = done.filter(e => e.productId === p.id && isShipped(e, p));
     const withOrders = shipped.filter(e => e.orders != null);
     return { id: p.id, name: p.name,
+      started: done.filter(e => e.productId === p.id && e.stepId === p.steps[0]?.id).reduce((a, e) => a + (Number(e.qty) || 0), 0),
       finished: shipped.reduce((a, e) => a + (Number(e.qty) || 0), 0),
       orders: withOrders.length ? withOrders.reduce((a, e) => a + (Number(e.orders) || 0), 0) : null,
       planned: resPlan && resPlanFor === date ? (Number(resPlan[p.id]) || null) : null };
-  }).filter(x => x.finished || x.planned);
+  }).filter(x => x.finished || x.planned || x.started);
   const sum = k => list.reduce((a, t) => a + t[k], 0);
   return { date, techs: list, worked: sum("worked"), logged: sum("logged"), earned: sum("earned"), products: prods,
     steps: Object.values(steps).sort((a, b) => b.earned - a.earned), unrated: Object.values(unrated) };
 }
-// Units started (first step) but not yet shipped, carried day to day from the start date in Setup.
-// Clearing ("_shipped", "_scrap", "_error") takes units out; "_shipped" also counts as shipped volume.
+// Work in progress, carried day to day from the start date in Setup.
+// Units enter at the first step, then move step by step as hands-on steps log them; printer steps aren't logged, so they're skipped.
+// Each day, a step can only move units that were waiting for it. Clearing takes units out from the most advanced step back;
+// "Shipped, but not logged" also counts them as shipped.
+function wipStages(p){
+  const end = p.steps.findIndex(s => s.id === p.completeStep);
+  return p.steps.slice(1, end + 1).filter(s => s.kind !== "machine");
+}
 function computeCarry(date){
   const from = config?.carryStart; if (!from || date < from) return [];
   const out = [];
   for (const p of products()) {
     if (p.overhead || !p.completeStep || !p.steps[0] || p.steps[0].id === p.completeStep) continue;
-    const first = p.steps[0].id, byDay = {};
+    const first = p.steps[0].id, stages = wipStages(p); if (!stages.length) continue;
+    const byDay = {};
     for (const e of finished()) {
       if (e.productId !== p.id || e.date < from || e.date > date) continue;
-      const d = byDay[e.date] ||= { started: 0, out: 0 }, q = Number(e.qty) || 0;
+      const d = byDay[e.date] ||= { started: 0, done: {}, clear: 0 }, q = Number(e.qty) || 0;
       if (e.stepId === first) d.started += q;
-      else if (e.stepId === p.completeStep || CLEAR[e.stepId]) d.out += q;
+      else if (CLEAR[e.stepId]) d.clear += q;
+      else d.done[e.stepId] = (d.done[e.stepId] || 0) + q;
     }
-    let bal = 0;
-    for (const day of Object.keys(byDay).sort()) bal = Math.max(0, bal + byDay[day].started - byDay[day].out);
-    const today = byDay[date] || { started: 0, out: 0 };
-    if (bal > 0) out.push({ id: p.id, name: p.name, open: bal, started: today.started, out: today.out });
+    const wait = stages.map(() => 0);   // wait[i] = units waiting for stages[i]
+    for (const day of Object.keys(byDay).sort()) {
+      const d = byDay[day];
+      wait[0] += d.started;
+      stages.forEach((st, i) => {
+        const move = Math.min(d.done[st.id] || 0, wait[i]);
+        wait[i] -= move; if (i + 1 < stages.length) wait[i + 1] += move;
+      });
+      let c = d.clear;
+      for (let i = stages.length - 1; i >= 0 && c > 0; i--) { const t = Math.min(c, wait[i]); wait[i] -= t; c -= t; }
+    }
+    const open = wait.reduce((x, y) => x + y, 0);
+    const today = byDay[date] || { started: 0, done: {}, clear: 0 };
+    if (open > 0) out.push({ id: p.id, name: p.name, open, started: today.started,
+      out: (today.done[p.completeStep] || 0) + today.clear,
+      waiting: stages.map((st, i) => ({ step: st, units: wait[i], index: i })).filter(w => w.units > 0) });
   }
   return out;
 }
+// Hours to finish carried-over units: every remaining hands-on step from where each unit is waiting through Pack & ship.
+function carryLines(c){
+  const p = prod(c.id), stages = wipStages(p), { by } = rates(90), lines = [];
+  for (const w of c.waiting) for (const st of stages.slice(w.index)) {
+    const r = by[p.id + "|" + st.id];
+    const rate = r && r.n >= 3 && r.rate ? r.rate : Number(st.est) || null;
+    const units = perOrder(st) ? Math.ceil(w.units / unitsPerOrder(p)) : w.units;
+    const ex = lines.find(l => l.s.id === st.id);
+    if (ex) { ex.units += units; ex.hours = ex.rate ? ex.units / ex.rate : null; }
+    else lines.push({ p, s: st, units, rate, src: r && r.n >= 3 && r.rate ? "actual" : rate ? "target" : "missing", hours: rate ? units / rate : null, orders: perOrder(st), pending: true });
+  }
+  return lines;
+}
+const waitingText = c => c.waiting.map(w => `${w.step.name} ${fmtNum(w.units)}`).join(", ");
 const pctText = v => v == null || !isFinite(v) ? "—" : Math.round(v * 100) + "%";
 const pctPill = v => v == null || !isFinite(v) ? `<span class="note">—</span>` : `<span class="pill ${v * 100 >= goalPct() ? "good" : "bad"}">${pctText(v)}</span>`;
 let clearing = null;   // product id whose clear form is open
@@ -1229,9 +1269,9 @@ function renderResults(){
     set(`rl-${i}`, fmtNum(t.logged, 2)); set(`rp-${i}`, pctPill(t.worked ? t.earned / t.worked : null)); });
   if ($("#rw-total")) { $("#rw-total").textContent = fmtNum(R.worked, 2); $("#rl-total").textContent = fmtNum(R.logged, 2); $("#rp-total").innerHTML = pctPill(prodty); }
   const anyPlan = R.products.some(x => x.planned != null), anyOrders = R.products.some(x => x.orders != null);
-  $("#resProducts").innerHTML = !R.products.length ? `<tbody><tr><td><div class="empty">Nothing shipped on ${esc(label)}.</div></td></tr></tbody>` :
-    `<thead><tr><th>Product</th>${anyPlan ? `<th class="n">Planned</th>` : ""}<th class="n">Units</th>${anyOrders ? `<th class="n">Orders</th>` : ""}</tr></thead><tbody>` +
-    R.products.map(x => `<tr><td><span class="sw" style="background:${colorVar(prod(x.id))}"></span>${esc(x.name)}</td>${anyPlan ? `<td class="n">${x.planned == null ? "—" : fmtNum(x.planned)}</td>` : ""}<td class="n"><b>${fmtNum(x.finished)}</b></td>${anyOrders ? `<td class="n">${x.orders == null ? "—" : fmtNum(x.orders)}</td>` : ""}</tr>`).join("") + `</tbody>`;
+  $("#resProducts").innerHTML = !R.products.length ? `<tbody><tr><td><div class="empty">Nothing started or shipped on ${esc(label)}.</div></td></tr></tbody>` :
+    `<thead><tr><th>Product</th>${anyPlan ? `<th class="n">Planned</th>` : ""}<th class="n">Started</th><th class="n">Shipped</th>${anyOrders ? `<th class="n">Orders</th>` : ""}</tr></thead><tbody>` +
+    R.products.map(x => `<tr><td><span class="sw" style="background:${colorVar(prod(x.id))}"></span>${esc(x.name)}</td>${anyPlan ? `<td class="n">${x.planned == null ? "—" : fmtNum(x.planned)}</td>` : ""}<td class="n">${fmtNum(x.started)}</td><td class="n"><b>${fmtNum(x.finished)}</b></td>${anyOrders ? `<td class="n">${x.orders == null ? "—" : fmtNum(x.orders)}</td>` : ""}</tr>`).join("") + `</tbody>`;
   $("#resSteps").innerHTML = !R.steps.length ? `<tbody><tr><td><div class="empty">No hands-on work logged on ${esc(label)}.</div></td></tr></tbody>` :
     `<thead><tr><th>Product</th><th>Step</th><th class="n">Done</th><th class="n">Expected</th><th class="n">Pace</th></tr></thead><tbody>` +
     R.steps.slice(0, 10).map(x => `<tr><td>${esc(x.product)}</td><td>${esc(x.step)}</td><td class="n">${x.units == null ? "—" : fmtNum(x.units)}</td><td class="n">${x.expected == null ? "—" : fmtNum(x.expected, 1)}</td><td class="n">${x.expected ? pctPill(x.units / x.expected) : "—"}</td></tr>`).join("") + `</tbody>`;
@@ -1245,15 +1285,15 @@ function renderCarry(){
   $("#carryNote").textContent = C.length ? "Add a short note for each, or clear units that aren't still waiting for Pack & ship." : "";
   if ($("#resCarry").contains(document.activeElement) && document.activeElement.dataset.carryNote) return;   // don't interrupt typing
   $("#resCarry").innerHTML = !C.length ? `<tbody><tr><td><div class="empty">Nothing carried over. Every unit started has shipped.</div></td></tr></tbody>` :
-    `<thead><tr><th>Product</th><th class="n">Open units</th><th class="n">Started</th><th class="n">Shipped or cleared</th><th>Why are these still open?</th><th></th></tr></thead><tbody>` +
-    C.map(c => `<tr><td><span class="sw" style="background:${colorVar(prod(c.id))}"></span>${esc(c.name)}</td><td class="n"><b>${fmtNum(c.open)}</b></td><td class="n">${fmtNum(c.started)}</td><td class="n">${fmtNum(c.out)}</td>
+    `<thead><tr><th>Product</th><th class="n">Open units</th><th>Waiting at</th><th class="n">Hours to finish</th><th>Why are these still open?</th><th></th></tr></thead><tbody>` +
+    C.map(c => { const hrs = carryLines(c).reduce((a, l) => a + (l.hours || 0), 0); return `<tr><td><span class="sw" style="background:${colorVar(prod(c.id))}"></span>${esc(c.name)}</td><td class="n"><b>${fmtNum(c.open)}</b></td><td>${esc(waitingText(c))}</td><td class="n">${hrs ? fmtNum(hrs, 2) : "—"}</td>
       <td><input type="text" maxlength="200" id="cn-${esc(c.id)}" data-carry-note="${esc(c.id)}" value="${esc(notes[c.id] || "")}" placeholder="e.g. waiting on reprint" style="min-width:200px" aria-label="Why ${esc(c.name)} units are still open"></td>
       <td><button class="link" type="button" data-clear-open="${esc(c.id)}">Clear</button></td></tr>
       ${clearing === c.id ? `<tr><td colspan="6"><div class="row" style="gap:8px;align-items:flex-end">
         <label class="f">Units to clear<input type="number" id="cc-qty" min="1" max="${c.open}" step="1" value="${c.open}" style="width:90px"></label>
         <label class="f">Reason<select id="cc-why">${Object.entries(CLEAR).map(([k,v]) => opt(k, v, k === "_shipped")).join("")}</select></label>
         <button class="b primary small" type="button" data-clear-go="${esc(c.id)}">Clear units</button><button class="b small" type="button" data-clear-cancel="1">Cancel</button>
-        <span class="note" id="cc-msg">"Shipped, but not logged" counts them as shipped. The other reasons remove them without counting.</span></div></td></tr>` : ""}`).join("") + `</tbody>`;
+        <span class="note" id="cc-msg">"Shipped, but not logged" counts them as shipped. The other reasons remove them without counting.</span></div></td></tr>` : ""}`; }).join("") + `</tbody>`;
 }
 $("#resCarry").addEventListener("input", ev => {
   const id = ev.target.dataset.carryNote; if (!id) return;
@@ -1275,7 +1315,7 @@ $("#resCarry").addEventListener("click", async ev => {
   try {
     await writeEntry({ employee: $("#emailBy").value || store.get("prt.emp") || null, productId: c.id, stepId: why, kind: "adjust", qty,
       distributor: null, printer: null, note: CLEAR[why], date, start: at, end: at, createdAt: Date.now() });
-    clearing = null; toast(`Cleared ${qty} ${c.name} unit${qty > 1 ? "s" : ""}`); renderResults();
+    clearing = null; toast(`Cleared ${qty} ${c.name} unit${qty > 1 ? "s" : ""}`); renderResults(); renderForecastOut();
     if (!$("#emailPanel").hidden) openEmailPanel();
   } catch (err) { ev.target.disabled = false; $("#cc-msg").textContent = "Couldn't clear: " + err.message; }
 });
@@ -1291,10 +1331,11 @@ function resultsForReport(){
   return { label: parseYmd(date).toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" }), goal: goalPct(),
     worked: R.worked, earned: R.earned, logged: R.logged,
     techs: R.techs.filter(t => t.worked || t.earned || t.logged).map(t => ({ name: t.name, worked: t.worked, earned: t.earned, logged: t.logged })),
-    products: R.products.map(x => ({ name: x.name, finished: x.finished, planned: x.planned, orders: x.orders })),
+    products: R.products.map(x => ({ name: x.name, started: x.started, finished: x.finished, planned: x.planned, orders: x.orders })),
     steps: R.steps.slice(0, 10).map(x => ({ product: x.product, step: x.step, units: x.units, expected: x.expected, earned: x.earned })),
     unrated: R.unrated.slice(0, 12),
-    carry: C.map(c => ({ name: c.name, open: c.open, note: notes[c.id] || "" })) };
+    carry: C.map(c => ({ name: scriptVersion >= 8 ? c.name : `${c.name} (waiting at ${waitingText(c)})`, open: c.open, note: notes[c.id] || "",
+      waiting: waitingText(c), hours: carryLines(c).reduce((a, l) => a + (l.hours || 0), 0) })) };
 }
 $("#resTechs").addEventListener("input", ev => {
   const name = ev.target.dataset.worked; if (name == null) return;
@@ -1303,7 +1344,7 @@ $("#resTechs").addEventListener("input", ev => {
   saveWorked(date, w); renderResults();
   if (!$("#emailPanel").hidden) openEmailPanel();
 });
-$("#resDate").addEventListener("change", () => { clearing = null; renderResults(); loadResPlan(); if (!$("#emailPanel").hidden) openEmailPanel(); });
+$("#resDate").addEventListener("change", () => { clearing = null; renderResults(); renderForecastOut(); loadResPlan(); if (!$("#emailPanel").hidden) openEmailPanel(); });
 
 function renderForecast(){
   const anyPer = products().some(p => !p.overhead && p.steps.some(perOrder));
@@ -1333,7 +1374,7 @@ function renderForecastOut(){
   const util = capPrinter ? f.printer/capPrinter : null;
   const bottleneck = util!=null && f.printer>0 ? (f.printer/capPrinter > f.labor/(hpp*f.D*Math.max(1,Math.ceil(people))) ? "printer" : "people") : null;
   $("#fcSummary").innerHTML = `<div class="kpis">
-    <div class="kpi"><span class="l">Labor hours</span><span class="v">${fmtH(f.labor)}</span><span class="s">incl. overhead, per ${fcPeriod}</span></div>
+    <div class="kpi"><span class="l">Labor hours</span><span class="v">${fmtH(f.labor)}</span><span class="s">incl. overhead${f.carryHours ? ` and ${fmtNum(f.carryHours,2)} h carried over` : ""}, per ${fcPeriod}</span></div>
     <div class="kpi"><span class="l">People needed</span><span class="v">${fmtNum(people,1)}</span><span class="s">at ${hpp} productive hrs × ${f.D} day${f.D>1?"s":""}</span></div>
     <div class="kpi"><span class="l">Printer hours</span><span class="v">${f.printer?fmtH(f.printer):"—"}</span><span class="s">${capPrinter?`of ${fmtH(capPrinter)} available`:"Add printers in Setup"}</span></div></div>
     ${f.pools.map(pl => { const u = pl.cap ? pl.hours / pl.cap : null; return `<div class="section" style="gap:6px"><div class="head"><span class="note"><b style="color:var(--ink)">${esc(pl.label)}</b> · ${esc(pl.products.join(", "))}</span><span class="mono">${fmtNum(pl.hours,2)} of ${pl.cap ? fmtNum(pl.cap,1) : "0"} h${u!=null ? ` · ${fmtNum(u*100)}%` : ""}</span></div><div class="meter"><i class="${u==null||u>1?"over":""}" style="width:${u==null?100:Math.min(100,u*100)}%"></i></div></div>`; }).join("")}
@@ -1343,7 +1384,7 @@ function renderForecastOut(){
   const L = f.lines.filter(l => l.hours || l.src==="missing");
   $("#fcSteps").innerHTML = !L.length ? `<tbody><tr><td><div class="empty">The breakdown appears once there are planned units.</div></td></tr></tbody>` :
     `<thead><tr><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Rate /hr</th><th>Rate from</th><th class="n">Hours</th></tr></thead><tbody>` +
-    L.map(l => `<tr><td><span class="sw" style="background:${colorVar(l.p)}"></span>${esc(l.p.name)}</td><td>${esc(l.s.name)} ${l.s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${l.units==null?"—":fmtNum(l.units) + (l.orders ? " orders" : "")}</td><td class="n">${l.rate?fmtNum(l.rate,1):"—"}</td><td><span class="pill ${l.src==="actual"?"good":l.src==="missing"?"warn":""}">${l.p.overhead?(l.src==="actual"?"logged avg":"setup h/day"):l.src}</span></td><td class="n">${l.hours?fmtNum(l.hours,2):"—"}</td></tr>`).join("") + `</tbody>`;
+    L.map(l => `<tr><td><span class="sw" style="background:${colorVar(l.p)}"></span>${esc(l.p.name)}</td><td>${esc(l.s.name)} ${l.s.kind==="machine"?`<span class="pill machine">printer</span>`:""}${l.pending?` <span class="pill warn">carried over</span>`:""}</td><td class="n">${l.units==null?"—":fmtNum(l.units) + (l.orders ? " orders" : "")}</td><td class="n">${l.rate?fmtNum(l.rate,1):"—"}</td><td><span class="pill ${l.src==="actual"?"good":l.src==="missing"?"warn":""}">${l.p.overhead?(l.src==="actual"?"logged avg":"setup h/day"):l.src}</span></td><td class="n">${l.hours?fmtNum(l.hours,2):"—"}</td></tr>`).join("") + `</tbody>`;
 }
 $("#fcInputs").addEventListener("change", ev => {
   const id = ev.target.dataset.fco; if (!id) return;
@@ -1386,7 +1427,7 @@ function buildReport(){
       if (scriptVersion < 4 && oldest) return { name: `${p.name} (oldest order ${parseYmd(oldest).toLocaleDateString("en-US",{month:"short",day:"numeric"})}, ${d} days)`, units: units || 0.0001 };
       return { name: p.name, units, oldest, daysWaiting: d };
     }),
-    steps: f.lines.filter(l => l.hours).map(l => ({ product: l.p.name, step: l.s.name + (l.orders ? " (orders)" : ""), units: l.units, hours: l.hours, printer: l.s.kind === "machine" })),
+    steps: f.lines.filter(l => l.hours).map(l => ({ product: l.p.name, step: l.s.name + (l.orders ? " (orders)" : "") + (l.pending ? " · carried over" : ""), units: l.units, hours: l.hours, printer: l.s.kind === "machine" })),
     sentBy: $("#emailBy").value || "", note: $("#emailNote").value.trim(), pageUrl,
     date: $("#fcDate").value || todayStr(),
     plan: fcPeriod === "day" ? Object.fromEntries(products().filter(p => !p.overhead && Number(fcPlan[p.id]) > 0).map(p => [p.id, Number(fcPlan[p.id])])) : {},

@@ -62,6 +62,10 @@ timeclock; everything else comes from the floor log for that date.
   each before it sends. Units that aren't really pending can be cleared with a reason: "Shipped, but not logged" counts
   them as shipped; "Misprint or scrap" and "Entered by mistake" just remove them. Clears are rows on `Entries` with
   stepId `_shipped`, `_scrap` or `_error` and kind `adjust`; deleting one from the Day log undoes it.
+- **Work in progress:** carry-over follows units step by step (printer steps aren't logged, so they're skipped), so the
+  report shows where open units are waiting and the hours to finish them. The day forecast adds those remaining steps
+  to today's labor hours, labelled "carried over". Planned units are new work only. Started vs shipped per product is
+  in the report (script version 8).
 - **Output vs target:** the work finished at target pace divided by hours worked, with units done vs expected per step.
 - **Orders-per-hour targets:** on Setup, a product's finishing step can set "Target counts" to Orders. Its target is
   then orders per hour; the forecast uses planned orders (typed, or estimated from units at the product's usual units

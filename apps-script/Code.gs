@@ -11,7 +11,7 @@
  */
 
 const PASSCODE = 'CHANGE-ME';   // change here to rotate; redeploy after changing
-const SCRIPT_VERSION = 7;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans, 6 = orders at ship, carry-over, output vs target, 7 = printer load per printer group
+const SCRIPT_VERSION = 8;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans, 6 = orders at ship, carry-over, output vs target, 7 = printer load per printer group, 8 = started units + where carried-over work is waiting
 const MAX_RECIPIENTS = 25;          // per report
 const MAX_REPORTS_PER_DAY = 20;     // guards the Gmail sending quota
 const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt','orders'];
@@ -254,13 +254,15 @@ function emailReport_(r) {
     }
     if (res.products.length) {
       const anyPlan = res.products.some(p => p.planned != null), anyOrders = res.products.some(p => p.orders != null);
-      html += h3('Shipped') + tbl + th('Product') + (anyPlan ? thn('Planned') : '') + thn('Units') + (anyOrders ? thn('Orders') : '') + '</tr>';
-      res.products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + (anyPlan ? tdn(p.planned == null ? '—' : num_(p.planned)) : '') + tdn('<b>' + num_(p.finished) + '</b>') + (anyOrders ? tdn(p.orders == null ? '—' : num_(p.orders)) : '') + '</tr>'; });
+      const anyStarted = res.products.some(p => p.started != null);
+      html += h3('Started and shipped') + tbl + th('Product') + (anyPlan ? thn('Planned') : '') + (anyStarted ? thn('Started') : '') + thn('Shipped units') + (anyOrders ? thn('Orders') : '') + '</tr>';
+      res.products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + (anyPlan ? tdn(p.planned == null ? '—' : num_(p.planned)) : '') + (anyStarted ? tdn(p.started == null ? '—' : num_(p.started)) : '') + tdn('<b>' + num_(p.finished) + '</b>') + (anyOrders ? tdn(p.orders == null ? '—' : num_(p.orders)) : '') + '</tr>'; });
       html += '</table>';
     }
     if (res.carry.length) {
-      html += h3('Carried over') + tbl + th('Product') + thn('Open units') + th('Why') + '</tr>';
-      res.carry.forEach(c => { html += '<tr>' + td(esc_(c.name)) + tdn('<b>' + num_(c.open) + '</b>') + td(c.note ? esc_(c.note) : '<span style="color:' + muted + '">—</span>') + '</tr>'; });
+      const anyWait = res.carry.some(c => c.waiting);
+      html += h3('Carried over') + tbl + th('Product') + thn('Open units') + (anyWait ? th('Waiting at') + thn('Hours to finish') : '') + th('Why') + '</tr>';
+      res.carry.forEach(c => { html += '<tr>' + td(esc_(c.name)) + tdn('<b>' + num_(c.open) + '</b>') + (anyWait ? td(esc_(c.waiting || '—')) + tdn(c.hours ? hrs_(c.hours) : '—') : '') + td(c.note ? esc_(c.note) : '<span style="color:' + muted + '">—</span>') + '</tr>'; });
       html += '</table>';
     }
     if (res.steps.length) {
@@ -301,8 +303,8 @@ function emailReport_(r) {
   if (res) {
     text += 'YESTERDAY · ' + res.label + '\nOutput vs target: ' + pct_(res.productivity) + ' (goal ' + res.goal + '%)\nHours worked: ' + (res.worked ? hrs_(res.worked) : '—') + ' (' + hrs_(res.logged) + ' logged on tasks)\n';
     if (res.techs.length) text += res.techs.map(t => '  ' + t.name + ': worked ' + (t.worked ? hrs_(t.worked) : '—') + ', ' + pct_(t.worked ? t.earned / t.worked : null) + ' of target').join('\n') + '\n';
-    if (res.products.length) text += 'Shipped\n' + res.products.map(p => '  ' + p.name + ': ' + num_(p.finished) + ' units' + (p.orders != null ? ' in ' + num_(p.orders) + (p.orders === 1 ? ' order' : ' orders') : '') + (p.planned != null ? ' (' + num_(p.planned) + ' planned)' : '')).join('\n') + '\n';
-    if (res.carry.length) text += 'Carried over\n' + res.carry.map(c => '  ' + c.name + ': ' + num_(c.open) + ' open' + (c.note ? ' · ' + c.note : '')).join('\n') + '\n';
+    if (res.products.length) text += 'Shipped\n' + res.products.map(p => '  ' + p.name + ': ' + num_(p.finished) + ' units' + (p.orders != null ? ' in ' + num_(p.orders) + (p.orders === 1 ? ' order' : ' orders') : '') + (p.started != null ? ', ' + num_(p.started) + ' started' : '') + (p.planned != null ? ' (' + num_(p.planned) + ' planned)' : '')).join('\n') + '\n';
+    if (res.carry.length) text += 'Carried over\n' + res.carry.map(c => '  ' + c.name + ': ' + num_(c.open) + ' open' + (c.waiting ? ', waiting at ' + c.waiting : '') + (c.note ? ' · ' + c.note : '')).join('\n') + '\n';
     text += '\nTODAY · ' + label + '\n';
   }
   text += 'Labor hours: ' + hrs_(labor) + ' (incl. overhead)\nPeople needed: ' + num_(people, 1) + '\nPrinter hours: ' + (printer ? hrs_(printer) : '—') + (cap ? ' of ' + hrs_(cap) + ' available' : '') + '\n';
@@ -336,9 +338,9 @@ function parseResults_(x) {
   const goal = Math.min(200, Math.max(1, Number(x.goal) || 95));
   const techs = (Array.isArray(x.techs) ? x.techs : []).slice(0, 30).map(t => ({ name: str_(t.name, 60), worked: n(t.worked), earned: n(t.earned), logged: n(t.logged) })).filter(t => t.name && (t.worked || t.earned || t.logged));
   const opt = v => v == null || v === '' ? null : n(v);
-  const products = (Array.isArray(x.products) ? x.products : []).slice(0, 30).map(p => ({ name: str_(p.name, 60), finished: n(p.finished), planned: opt(p.planned), orders: opt(p.orders) })).filter(p => p.name && (p.finished || p.planned));
+  const products = (Array.isArray(x.products) ? x.products : []).slice(0, 30).map(p => ({ name: str_(p.name, 60), finished: n(p.finished), planned: opt(p.planned), orders: opt(p.orders), started: opt(p.started) })).filter(p => p.name && (p.finished || p.planned || p.started));
   const steps = (Array.isArray(x.steps) ? x.steps : []).slice(0, 12).map(s => ({ product: str_(s.product, 60), step: str_(s.step, 80), units: s.units == null ? null : n(s.units), expected: opt(s.expected), earned: n(s.earned) })).filter(s => s.earned > 0);
-  const carry = (Array.isArray(x.carry) ? x.carry : []).slice(0, 30).map(c => ({ name: str_(c.name, 60), open: n(c.open), note: str_(c.note, 200) })).filter(c => c.name && c.open > 0);
+  const carry = (Array.isArray(x.carry) ? x.carry : []).slice(0, 30).map(c => ({ name: str_(c.name, 60), open: n(c.open), note: str_(c.note, 200), waiting: str_(c.waiting, 160), hours: n(c.hours) })).filter(c => c.name && c.open > 0);
   const unrated = (Array.isArray(x.unrated) ? x.unrated : []).slice(0, 12).map(s => ({ product: str_(s.product, 60), step: str_(s.step, 80), units: n(s.units) }));
   const worked = n(x.worked), earned = n(x.earned), logged = n(x.logged);
   return { label: str_(x.label, 60), goal: goal, worked: worked, earned: earned, logged: logged, productivity: worked > 0 ? earned / worked : null, techs: techs, products: products, steps: steps, unrated: unrated, carry: carry };
