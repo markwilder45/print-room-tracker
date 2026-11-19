@@ -63,6 +63,9 @@ timeclock; everything else comes from the floor log for that date.
   them as shipped; "Misprint or scrap" and "Entered by mistake" just remove them. Clears are rows on `Entries` with
   stepId `_shipped`, `_scrap` or `_error` and kind `adjust`; deleting one from the Day log undoes it.
 - **Output vs target:** the work finished at target pace divided by hours worked, with units done vs expected per step.
+- **Orders-per-hour targets:** on Setup, a product's finishing step can set "Target counts" to Orders. Its target is
+  then orders per hour; the forecast uses planned orders (typed, or estimated from units at the product's usual units
+  per order), and output vs target and the time study measure that step in orders.
 - The forecast now uses the planned units at every step (the old learned step ratios are off).
 
 ## Raw data

@@ -514,6 +514,7 @@ const savedMetric = store.get("prt.metric");
 let dashMetric = (UNIT_STAGES[savedMetric] || savedMetric === "labor" || savedMetric === "printer") ? savedMetric : "started";
 let fcPeriod = "week";
 let fcPlan = {};              // productId -> units
+let fcOrders = {};            // productId -> planned orders (blank = estimated from units)
 // productId -> "YYYY-MM-DD" of the oldest open order; kept on this device so a refresh doesn't lose it
 let fcOldest = (() => { try { return JSON.parse(localStorage.getItem("prt.oldest") || "{}") || {}; } catch { return {}; } })();
 const todayStr = () => ymd(new Date());
@@ -933,6 +934,21 @@ const CLEAR = { _shipped: "Shipped, but not logged", _scrap: "Misprint or scrap"
 // Orders are asked on the finishing step once the sheet script can store them (version 6).
 const isShipStep = (pid, sid) => { const p = prod(pid); return scriptVersion >= 6 && !!p && !p.overhead && !!sid && p.completeStep === sid; };
 const isShipped = (e, p) => !!p && (e.stepId === p.completeStep || e.stepId === "_shipped");
+// A step whose target is set in orders per hour (Setup → "Counts"), normally Pack & ship.
+const perOrder = s => s?.per === "orders";
+// The count a step is measured in: orders for per-order steps (falling back to units for entries logged before orders existed).
+const workCount = (e, s) => perOrder(s) ? (e.orders != null ? Number(e.orders) : Number(e.qty) || 0) : (Number(e.qty) || 0);
+// Typical units per order for a product, from Pack & ship entries that recorded orders in the last 90 days.
+function unitsPerOrder(p){
+  const since = ymd(addDays(new Date(), -89));
+  let u = 0, o = 0;
+  for (const e of finished()) if (e.productId === p.id && e.stepId === p.completeStep && e.date >= since && e.orders > 0 && e.qty > 0) { u += Number(e.qty); o += Number(e.orders); }
+  return o >= 5 ? u / o : 1;   // until there are a few orders logged, assume one unit per order
+}
+function plannedOrders(p){
+  const typed = Number(fcOrders[p.id]); if (typed > 0) return typed;
+  const U = Number(fcPlan[p.id]) || 0; return U ? Math.ceil(U / unitsPerOrder(p)) : 0;
+}
 function stageStep(p, stage){
   if (!p || p.overhead) return null;
   if (stage === "started") return p.steps[0]?.id || null;
@@ -1033,7 +1049,7 @@ function rates(days, emp){
   const since = ymd(addDays(new Date(), -days+1));
   const es = finished().filter(e => e.date >= since && (!emp || e.employee===emp));
   const out = {};
-  for (const e of es) { const k=e.productId+"|"+e.stepId; const r = out[k] ||= {units:0,hours:0,n:0}; if (e.qty>0) { r.units+=e.qty; r.hours+=hoursOf(e); r.n++; } else if (prod(e.productId)?.overhead) { r.hours+=hoursOf(e); r.n++; } }
+  for (const e of es) { const k=e.productId+"|"+e.stepId; const r = out[k] ||= {units:0,hours:0,n:0}; const c = workCount(e, step(e.productId, e.stepId)); if (c>0) { r.units+=c; r.hours+=hoursOf(e); r.n++; } else if (prod(e.productId)?.overhead) { r.hours+=hoursOf(e); r.n++; } }
   for (const r of Object.values(out)) r.rate = r.hours>0 && r.units>0 ? r.units/r.hours : null;
   const workdays = new Set(es.map(e=>e.date)).size;
   return { by: out, workdays };
@@ -1052,7 +1068,7 @@ function renderTimeStudy(){
         html += `<tr><td>${esc(s.name)} <span class="pill machine">printer</span></td><td class="n">${s.est?fmtNum(s.est,1):"—"}</td><td class="n">—</td><td>${s.est?`<span class="pill">From printer logs</span>`:`<span class="pill warn">No printer rate</span>`}</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">${s.est?fmtNum(60/s.est,1):"—"}</td><td></td></tr>`; continue;
       }
       const trusted = r.n >= 3 && r.rate;
-      html += `<tr><td>${esc(s.name)} ${s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${s.est?fmtNum(s.est,1):"—"}</td><td class="n">${r.rate?fmtNum(r.rate,1):"—"}</td>
+      html += `<tr><td>${esc(s.name)} ${s.kind==="machine"?`<span class="pill machine">printer</span>`:""}${perOrder(s)?` <span class="pill">per order</span>`:""}</td><td class="n">${s.est?fmtNum(s.est,1):"—"}</td><td class="n">${r.rate?fmtNum(r.rate,1):"—"}</td>
         <td>${r.rate ? (s.est ? verdict(s.est, r.rate) : `<span class="pill warn">No target</span>`) : (s.est?`<span class="pill">Needs data</span>`:`<span class="pill warn">No data</span>`)}${r.rate && !trusted ? ` <span class="note">(${r.n} of 3)</span>`:""}</td>
         <td class="n">${r.n}</td><td class="n">${fmtNum(r.units)}</td><td class="n">${fmtH(r.hours)}</td><td class="n">${r.rate?fmtNum(60/r.rate,1):"—"}</td>
         <td>${trusted && online && !emp ? `<button class="link" data-adopt="${esc(p.id)}|${esc(s.id)}|${r.rate.toFixed(1)}">Use actual</button>`:""}</td></tr>`;
@@ -1091,10 +1107,11 @@ function computeForecast(){
       const share = measuredShare ?? (s.share ?? 1);
       const rate = machine ? (Number(s.est) || null) : (r && r.n>=3 && r.rate ? r.rate : s.est || null);
       const src = machine ? (s.est ? "printer log" : "missing") : (r && r.n>=3 && r.rate ? "actual" : s.est ? "target" : "missing");
-      const hours = rate ? U*share/rate : null;
+      const base = perOrder(s) ? plannedOrders(p) : U;   // per-order steps forecast from orders
+      const hours = rate ? base*share/rate : null;
       if (hours==null && share>0) missing++;
       if (hours) { if (s.kind==="machine") printer+=hours; else labor+=hours; }
-      lines.push({p,s,units:U*share,share,rate,src,hours});
+      lines.push({p,s,units:base*share,share,rate,src,hours,orders:perOrder(s)});
     }
   }
   return {lines, labor, printer, missing, D};
@@ -1121,13 +1138,13 @@ function computeResults(date){
     t.logged += h;
     let earned = 0;
     if (p.overhead) earned = h;                                         // maintenance, clean-up: credited at time logged
-    else if (Number(e.qty) > 0 && Number(s.est) > 0) earned = Number(e.qty) / Number(s.est);
+    else if (workCount(e, s) > 0 && Number(s.est) > 0) earned = workCount(e, s) / Number(s.est);
     else if (Number(e.qty) > 0 || h > 0) { const k = p.id + "|" + s.id; (unrated[k] ||= { product: p.name, step: s.name, units: 0 }).units += Number(e.qty) || 0; }
     t.earned += earned;
     if (earned > 0) {
       const k = p.id + "|" + s.id;
-      const r = steps[k] ||= { product: p.name, step: p.overhead ? s.name + " (at time logged)" : s.name, units: p.overhead ? null : 0, logged: 0, earned: 0, rate: p.overhead ? null : Number(s.est) };
-      r.earned += earned; r.logged += h; if (!p.overhead) r.units += Number(e.qty) || 0;
+      const r = steps[k] ||= { product: p.name, step: p.overhead ? s.name + " (at time logged)" : s.name + (perOrder(s) ? " (orders)" : ""), units: p.overhead ? null : 0, logged: 0, earned: 0, rate: p.overhead ? null : Number(s.est) };
+      r.earned += earned; r.logged += h; if (!p.overhead) r.units += workCount(e, s);
     }
   }
   for (const r of Object.values(steps)) r.expected = r.rate ? r.rate * r.logged : null;   // units the target pace would give in the time spent
@@ -1273,8 +1290,9 @@ $("#resTechs").addEventListener("input", ev => {
 $("#resDate").addEventListener("change", () => { clearing = null; renderResults(); loadResPlan(); if (!$("#emailPanel").hidden) openEmailPanel(); });
 
 function renderForecast(){
-  $("#fcInputs").innerHTML = `<thead><tr><th>Product</th><th class="n">Planned units</th><th>Oldest order</th><th class="n">Waiting</th><th class="n">Avg / ${fcPeriod}</th></tr></thead><tbody>` +
-    products().filter(p=>!p.overhead).map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td><td class="n"><input type="number" min="0" step="1" inputmode="numeric" id="fc-${esc(p.id)}" data-fc="${esc(p.id)}" value="${fcPlan[p.id] ?? ""}" style="width:90px;text-align:right" aria-label="Planned units for ${esc(p.name)}"></td><td><input type="date" id="fco-${esc(p.id)}" data-fco="${esc(p.id)}" value="${esc(fcOldest[p.id] || "")}" max="${esc($("#fcDate").value || todayStr())}" style="width:150px" aria-label="Oldest order date for ${esc(p.name)}"></td><td class="n" id="fcw-${esc(p.id)}">${waitingHTML(p.id)}</td><td class="n">${fmtNum(avgVolume(p))}</td></tr>`).join("") + `</tbody>`;
+  const anyPer = products().some(p => !p.overhead && p.steps.some(perOrder));
+  $("#fcInputs").innerHTML = `<thead><tr><th>Product</th><th class="n">Planned units</th>${anyPer ? `<th class="n" title="Leave blank to estimate from units">Orders</th>` : ""}<th>Oldest order</th><th class="n">Waiting</th><th class="n">Avg / ${fcPeriod}</th></tr></thead><tbody>` +
+    products().filter(p=>!p.overhead).map(p => `<tr><td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)}</td><td class="n"><input type="number" min="0" step="1" inputmode="numeric" id="fc-${esc(p.id)}" data-fc="${esc(p.id)}" value="${fcPlan[p.id] ?? ""}" style="width:90px;text-align:right" aria-label="Planned units for ${esc(p.name)}"></td>${anyPer ? `<td class="n">${p.steps.some(perOrder) ? `<input type="number" min="0" step="1" inputmode="numeric" id="fcr-${esc(p.id)}" data-fcr="${esc(p.id)}" value="${fcOrders[p.id] ?? ""}" placeholder="${plannedOrders(p) || ""}" style="width:76px;text-align:right" aria-label="Planned orders for ${esc(p.name)}">` : `<span class="note">—</span>`}</td>` : ""}<td><input type="date" id="fco-${esc(p.id)}" data-fco="${esc(p.id)}" value="${esc(fcOldest[p.id] || "")}" max="${esc($("#fcDate").value || todayStr())}" style="width:150px" aria-label="Oldest order date for ${esc(p.name)}"></td><td class="n" id="fcw-${esc(p.id)}">${waitingHTML(p.id)}</td><td class="n">${fmtNum(avgVolume(p))}</td></tr>`).join("") + `</tbody>`;
   renderForecastOut();
   $("#resSection").hidden = fcPeriod !== "day";
   $("#fcTodayHead").textContent = fcPeriod === "day" ? "Today's forecast" : `Forecast for the ${fcPeriod}`;
@@ -1309,7 +1327,7 @@ function renderForecastOut(){
   const L = f.lines.filter(l => l.hours || l.src==="missing");
   $("#fcSteps").innerHTML = !L.length ? `<tbody><tr><td><div class="empty">The breakdown appears once there are planned units.</div></td></tr></tbody>` :
     `<thead><tr><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Rate /hr</th><th>Rate from</th><th class="n">Hours</th></tr></thead><tbody>` +
-    L.map(l => `<tr><td><span class="sw" style="background:${colorVar(l.p)}"></span>${esc(l.p.name)}</td><td>${esc(l.s.name)} ${l.s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${l.units==null?"—":fmtNum(l.units)}</td><td class="n">${l.rate?fmtNum(l.rate,1):"—"}</td><td><span class="pill ${l.src==="actual"?"good":l.src==="missing"?"warn":""}">${l.p.overhead?(l.src==="actual"?"logged avg":"setup h/day"):l.src}</span></td><td class="n">${l.hours?fmtNum(l.hours,2):"—"}</td></tr>`).join("") + `</tbody>`;
+    L.map(l => `<tr><td><span class="sw" style="background:${colorVar(l.p)}"></span>${esc(l.p.name)}</td><td>${esc(l.s.name)} ${l.s.kind==="machine"?`<span class="pill machine">printer</span>`:""}</td><td class="n">${l.units==null?"—":fmtNum(l.units) + (l.orders ? " orders" : "")}</td><td class="n">${l.rate?fmtNum(l.rate,1):"—"}</td><td><span class="pill ${l.src==="actual"?"good":l.src==="missing"?"warn":""}">${l.p.overhead?(l.src==="actual"?"logged avg":"setup h/day"):l.src}</span></td><td class="n">${l.hours?fmtNum(l.hours,2):"—"}</td></tr>`).join("") + `</tbody>`;
 }
 $("#fcInputs").addEventListener("change", ev => {
   const id = ev.target.dataset.fco; if (!id) return;
@@ -1318,7 +1336,12 @@ $("#fcInputs").addEventListener("change", ev => {
   $(`#fcw-${CSS.escape(id)}`).innerHTML = waitingHTML(id);
   if (!$("#emailPanel").hidden) openEmailPanel();
 });
-$("#fcInputs").addEventListener("input", ev => { const id=ev.target.dataset.fc; if (!id) return; fcPlan[id] = ev.target.value===""?"":Number(ev.target.value); renderForecastOut(); });
+$("#fcInputs").addEventListener("input", ev => {
+  const oid = ev.target.dataset.fcr; if (!oid) return;
+  fcOrders[oid] = ev.target.value === "" ? "" : Number(ev.target.value); renderForecastOut();
+});
+$("#fcInputs").addEventListener("input", ev => { const id=ev.target.dataset.fc; if (!id) return;
+  const ord = document.getElementById(`fcr-${id}`); if (ord) setTimeout(() => { const pp = prod(id); ord.placeholder = pp ? (plannedOrders(pp) || "") : ""; }, 0); fcPlan[id] = ev.target.value===""?"":Number(ev.target.value); renderForecastOut(); });
 $("#btnFillAvg").addEventListener("click", () => { for (const p of products()) if (!p.overhead) fcPlan[p.id] = Math.round(avgVolume(p)); renderForecast(); });
 $$("[data-period]").forEach(b => b.addEventListener("click", () => { fcPeriod=b.dataset.period; $$("[data-period]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); syncEmailButton(); renderForecast(); if (!$("#emailPanel").hidden) openEmailPanel(); }));
 
@@ -1346,7 +1369,7 @@ function buildReport(){
       if (scriptVersion < 4 && oldest) return { name: `${p.name} (oldest order ${parseYmd(oldest).toLocaleDateString("en-US",{month:"short",day:"numeric"})}, ${d} days)`, units: units || 0.0001 };
       return { name: p.name, units, oldest, daysWaiting: d };
     }),
-    steps: f.lines.filter(l => l.hours).map(l => ({ product: l.p.name, step: l.s.name, units: l.units, hours: l.hours, printer: l.s.kind === "machine" })),
+    steps: f.lines.filter(l => l.hours).map(l => ({ product: l.p.name, step: l.s.name + (l.orders ? " (orders)" : ""), units: l.units, hours: l.hours, printer: l.s.kind === "machine" })),
     sentBy: $("#emailBy").value || "", note: $("#emailNote").value.trim(), pageUrl,
     date: $("#fcDate").value || todayStr(),
     plan: fcPeriod === "day" ? Object.fromEntries(products().filter(p => !p.overhead && Number(fcPlan[p.id]) > 0).map(p => [p.id, Number(fcPlan[p.id])])) : {},
@@ -1414,13 +1437,14 @@ function renderSetup(){
   $("#setHrs").value = draft.productiveHoursPerPerson; $("#setDays").value = draft.workdaysPerWeek; $("#setGoal").value = draft.productivityGoal ?? 95; $("#setCarry").value = draft.carryStart || "";
   if (!renderSetup.opened && draft.products[0]) { openProducts.add(draft.products[0].id); renderSetup.opened = true; }
   $("#prodEditor").innerHTML = draft.products.map((p,pi) => `<details data-prod="${esc(p.id)}" ${openProducts.has(p.id)?"open":""}><summary><span class="sw" style="background:${colorVar(p)}"></span>${esc(p.name)} <span class="note">· ${p.steps.length} steps</span></summary>
-    <div class="tablewrap" style="margin-top:8px"><table class="stepgrid"><thead><tr><th>Order</th><th>Step</th><th>Kind</th><th title="Ask the tech which printer this was for">Printer?</th><th class="n">${p.overhead?"Hours / day":"Target / hr"}</th>${p.overhead?"":`<th class="n">Share</th><th>Counts volume</th>`}<th></th></tr></thead><tbody>
+    <div class="tablewrap" style="margin-top:8px"><table class="stepgrid"><thead><tr><th>Order</th><th>Step</th><th>Kind</th><th title="Ask the tech which printer this was for">Printer?</th><th class="n">${p.overhead?"Hours / day":"Target / hr"}</th>${p.overhead?"":`<th class="n">Share</th><th>Counts volume</th><th title="What the target counts: units, or orders (for packing)">Target counts</th>`}<th></th></tr></thead><tbody>
     ${p.steps.map((s,si) => `<tr data-row="${pi}|${si}"><td class="ordcell"><button class="grip" type="button" data-grip="${pi}|${si}" aria-label="Drag ${esc(s.name)} to reorder" title="Drag to reorder"><svg viewBox="0 0 14 16" aria-hidden="true"><g fill="currentColor"><circle cx="4" cy="3" r="1.6"/><circle cx="10" cy="3" r="1.6"/><circle cx="4" cy="8" r="1.6"/><circle cx="10" cy="8" r="1.6"/><circle cx="4" cy="13" r="1.6"/><circle cx="10" cy="13" r="1.6"/></g></svg></button><span class="ord">${si+1}</span></td><td><input type="text" id="s-${pi}-${si}-n" data-p="${pi}" data-s="${si}" data-k="name" value="${esc(s.name)}" style="min-width:180px"></td>
       <td><select id="s-${pi}-${si}-k" data-p="${pi}" data-s="${si}" data-k="kind" style="width:auto">${opt("labor","Hands-on",s.kind==="labor")}${opt("machine","Printer",s.kind==="machine")}</select></td>
       <td>${s.kind==="labor" ? `<input type="checkbox" id="s-${pi}-${si}-ap" data-p="${pi}" data-s="${si}" data-k="askPrinter" ${s.askPrinter?"checked":""} style="width:auto" aria-label="Ask which printer for ${esc(s.name)}">` : ""}</td>
       <td class="n"><input type="number" min="0" step="0.1" id="s-${pi}-${si}-e" data-p="${pi}" data-s="${si}" data-k="${p.overhead?"perDay":"est"}" value="${(p.overhead?s.perDay:s.est) ?? ""}" style="width:90px;text-align:right" placeholder="—"></td>
       ${p.overhead?"":`<td class="n"><input type="number" min="0" max="2" step="0.05" id="s-${pi}-${si}-s" data-p="${pi}" data-s="${si}" data-k="share" value="${s.share ?? 1}" style="width:80px;text-align:right"></td>
-      <td><input type="radio" name="cs-${pi}" id="s-${pi}-${si}-c" data-p="${pi}" data-s="${si}" data-k="complete" ${p.completeStep===s.id?"checked":""} style="width:auto" aria-label="Count volume at ${esc(s.name)}"></td>`}
+      <td><input type="radio" name="cs-${pi}" id="s-${pi}-${si}-c" data-p="${pi}" data-s="${si}" data-k="complete" ${p.completeStep===s.id?"checked":""} style="width:auto" aria-label="Count volume at ${esc(s.name)}"></td>
+      <td>${s.kind==="labor" && p.completeStep===s.id ? `<select id="s-${pi}-${si}-per" data-p="${pi}" data-s="${si}" data-k="per" style="width:auto" aria-label="What the ${esc(s.name)} target counts">${opt("units","Units",!perOrder(s))}${opt("orders","Orders",perOrder(s))}</select>` : `<span class="note">units</span>`}</td>`}
       <td style="white-space:nowrap"><button class="mv" type="button" data-move="${pi}|${si}|-1" aria-label="Move ${esc(s.name)} up" ${si===0?"disabled":""}>↑</button> <button class="mv" type="button" data-move="${pi}|${si}|1" aria-label="Move ${esc(s.name)} down" ${si===p.steps.length-1?"disabled":""}>↓</button> <button class="link" type="button" data-rm-step="${pi}|${si}" style="color:var(--bad)">Remove</button></td></tr>`).join("")}
     </tbody></table></div><div class="row" style="margin-top:8px"><button class="b small" type="button" data-add-step="${pi}">Add step</button>
     ${p.overhead?"":`<label class="optional" style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="rq-${pi}" data-req="${pi}" ${p.distributorRequired!==false?"checked":""} style="width:auto"> Require a distributor on the first step (${esc(p.steps[0]?.name||"none yet")})</label>`}
@@ -1481,7 +1505,7 @@ $("#view-setup").addEventListener("input", ev => {
   const t = ev.target; if (!draft) return;
   if (t.dataset.pr != null) { const p = draft.printers[+t.dataset.pr]; p[t.dataset.k] = t.dataset.k==="name" ? t.value : Number(t.value); markDirty(); }
   else if (t.dataset.s != null) { const p=draft.products[+t.dataset.p], s=p.steps[+t.dataset.s], k=t.dataset.k;
-    if (k==="complete") p.completeStep = s.id; else if (k==="askPrinter") s.askPrinter = t.checked; else if (k==="name"||k==="kind") s[k]=t.value; else s[k] = t.value===""?null:Number(t.value); markDirty(); }
+    if (k==="complete") p.completeStep = s.id; else if (k==="askPrinter") s.askPrinter = t.checked; else if (k==="per") s.per = t.value === "orders" ? "orders" : undefined; else if (k==="name"||k==="kind") s[k]=t.value; else s[k] = t.value===""?null:Number(t.value); markDirty(); }
   else if (t.dataset.req != null) { draft.products[+t.dataset.req].distributorRequired = t.checked; markDirty(); }
   else if (t.id==="setHrs") { draft.productiveHoursPerPerson = Number(t.value)||6.5; markDirty(); }
   else if (t.id==="setDays") { draft.workdaysPerWeek = Number(t.value)||5; markDirty(); }
