@@ -668,11 +668,20 @@ function syncFormFields(){
   if (!p || p.overhead) formSplits = [];
   $("#fEmpWrap").firstChild.textContent = machine ? "Queued by " : "Employee ";
   $("#fOrdersWrap").hidden = !isShipStep(p?.id, s?.id);
+  delete $("#fOrders").dataset.touched; $("#fOrders").value = ordersFollowUnits(p?.id, s?.id) ? ($("#fQty").value || "") : 1; syncOrdersBox();
   renderFormSplits();
 }
 $("#fProd").addEventListener("change", () => { formSplits = defaultSplits(prod($("#fProd").value)); fillSteps(""); });
 $("#fStep").addEventListener("change", () => { const pid = $("#fProd").value; formSplits = isFirstStep(pid, $("#fStep").value) ? defaultSplits(prod(pid)) : []; syncFormFields(); });
 $("#fEmp").addEventListener("change", () => store.set("prt.emp", $("#fEmp").value));
+function syncOrdersBox(){
+  const follow = ordersFollowUnits($("#fProd").value, $("#fStep").value);
+  if (follow && !$("#fOrders").dataset.touched) $("#fOrders").value = $("#fQty").value || "";
+  else if (!follow && !$("#fOrders").dataset.touched && $("#fOrders").value === "") $("#fOrders").value = 1;
+  $("#fOrders").placeholder = follow ? "same as units" : "1";
+}
+$("#fQty").addEventListener("input", syncOrdersBox);
+$("#fOrders").addEventListener("input", () => { $("#fOrders").dataset.touched = "1"; });
 
 function setMode(m){ mode=m;
   $("#modeLive").setAttribute("aria-pressed", String(m==="live")); $("#modeManual").setAttribute("aria-pressed", String(m==="manual"));
@@ -689,7 +698,7 @@ function readForm(){
     qty: (p && !p.overhead && isFirstStep(pid, sid)) ? (formSplits.some(r => r.qty != null) ? splitTotal(formSplits) : null) : ($("#fQty").value === "" ? null : Math.max(0, Number($("#fQty").value))),
     distributor: p && !p.overhead && isFirstStep(pid, sid) ? encodeSplits(formSplits) : null,
     printer: (s?.kind==="machine" || s?.askPrinter) ? ($("#fPrinter").value || null) : null,
-    orders: isShipStep(pid, sid) ? (Math.max(0, Math.round(Number($("#fOrders").value) || 0)) || 1) : null,
+    orders: isShipStep(pid, sid) ? (Math.max(0, Math.round(Number($("#fOrders").value) || 0)) || (ordersFollowUnits(pid, sid) ? Math.max(1, Number($("#fQty").value) || 0) : 1)) : null,
     note: $("#fNote").value.trim() || null };
 }
 function formMsg(t, bad){ const m=$("#formMsg"); m.textContent=t; m.style.color = bad ? "var(--bad)" : ""; }
@@ -723,7 +732,7 @@ $("#btnStart").addEventListener("click", async () => {
   const now = Date.now();
   try {
     await writeEntry({ ...f, date: ymd(new Date(now)), start: now, end: null, createdAt: now });
-    formMsg(""); $("#fQty").value=""; $("#fNote").value=""; $("#fOrders").value = 1;
+    formMsg(""); $("#fQty").value=""; $("#fNote").value=""; delete $("#fOrders").dataset.touched; $("#fOrders").value = 1; syncOrdersBox();
     formSplits = defaultSplits(prod(f.productId)); renderFormSplits();
     toast("Timer started");
   } catch(err) { formMsg("Couldn't start: " + err.message, true); }
@@ -748,7 +757,7 @@ $("#btnSave").addEventListener("click", async () => {
     const entry = { ...f, date, start, end, pausedMs, pausedAt: null, createdAt: old?.createdAt || Date.now(), editedAt: editing ? Date.now() : null };
     await writeEntry(entry, editing?.id);
     toast(editing ? "Entry updated" : "Entry saved");
-    endEdit(); $("#fQty").value=""; $("#fNote").value=""; $("#fPaused").value=""; $("#fOrders").value = 1; formMsg("");
+    endEdit(); $("#fQty").value=""; $("#fNote").value=""; $("#fPaused").value=""; delete $("#fOrders").dataset.touched; $("#fOrders").value = 1; syncOrdersBox(); formMsg("");
     formSplits = defaultSplits(prod(f.productId)); renderFormSplits();
   } catch(err) { formMsg("Couldn't save: " + err.message, true); }
 });
@@ -764,7 +773,7 @@ function beginEdit(e){
   $("#fDate").value = e.date; const s=new Date(e.start), en=new Date(e.end);
   $("#fStart").value = `${pad(s.getHours())}:${pad(s.getMinutes())}`; $("#fEnd").value = `${pad(en.getHours())}:${pad(en.getMinutes())}`;
   $("#fPaused").value = e.pausedMs ? Math.round(e.pausedMs / 60000) : "";
-  $("#fOrders").value = e.orders ?? 1;
+  $("#fOrders").value = e.orders ?? (ordersFollowUnits(e.productId, e.stepId) ? (e.qty ?? "") : 1); $("#fOrders").dataset.touched = "1";
   setMode("manual"); $("#btnCancelEdit").hidden=false; $("#formTitle").textContent="Edit entry";
   $("#entryCard").scrollIntoView({behavior:"smooth", block:"start"});
 }
@@ -790,7 +799,7 @@ function paintTimers(){
       <div class="what">${paused ? `<span class="pill paused">Paused since ${fmtTime(t.pausedAt)}</span> ` : ""}${esc(p?.name||t.productId)} · ${esc(s?.name||t.stepId)} · since ${fmtTime(t.start)}${t.pausedMs ? ` · ${fmtElapsed(t.pausedMs)} paused` : ""}${machine&&t.employee?` · queued by ${esc(t.employee)}`:""}${!machine&&t.printer?` · ${esc(t.printer)}`:""}</div></div>
       <div class="el" data-tid="${esc(t.id)}" title="Worked time (pauses not counted)">${fmtElapsed(activeMs(t))}</div>
       ${p && !p.overhead && isFirstStep(t.productId, t.stepId) ? splitEditorHTML(t.id, timerRows(t)) : ""}
-      <div class="act">${p && !p.overhead && isFirstStep(t.productId, t.stepId) ? (timerRows(t).length > 1 ? `<span class="splittotal">${fmtNum(splitTotal(timerRows(t)))} units total</span>` : "") : `<input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">${isShipStep(t.productId, t.stepId) ? `<span class="note">units in</span><input type="number" min="1" step="1" inputmode="numeric" id="o-${esc(t.id)}" value="${t.orders ?? 1}" style="width:70px" aria-label="Orders"><span class="note">order(s)</span>` : ""}`}
+      <div class="act">${p && !p.overhead && isFirstStep(t.productId, t.stepId) ? (timerRows(t).length > 1 ? `<span class="splittotal">${fmtNum(splitTotal(timerRows(t)))} units total</span>` : "") : `<input type="number" min="0" step="1" inputmode="numeric" id="q-${esc(t.id)}" placeholder="Units" value="${t.qty ?? ""}" aria-label="Units finished">${isShipStep(t.productId, t.stepId) ? `<span class="note">units in</span><input type="number" min="1" step="1" inputmode="numeric" id="o-${esc(t.id)}" value="${t.orders ?? (ordersFollowUnits(t.productId, t.stepId) ? (t.qty ?? "") : 1)}" placeholder="${ordersFollowUnits(t.productId, t.stepId) ? "= units" : "1"}" data-follow="${ordersFollowUnits(t.productId, t.stepId) ? "1" : ""}" style="width:70px" aria-label="Orders"><span class="note">order(s)</span>` : ""}`}
         <button class="b small" type="button" data-pause="${esc(t.id)}">${paused ? (armedResume.has(t.id) ? "Resume anyway?" : "Resume") : "Pause"}</button>
         <button class="b primary small" type="button" data-stop="${esc(t.id)}">Stop &amp; save</button>
         <button class="link" type="button" data-discard="${esc(t.id)}">Discard</button></div></div>`;
@@ -837,7 +846,7 @@ $("#timers").addEventListener("click", async ev => {
   if (q === "" && !prod(t.productId)?.overhead) { (first ? $(`#sp-${CSS.escape(t.id)}-0-qty`) : $(`#q-${CSS.escape(t.id)}`))?.focus(); toast(multi ? "Enter units for each distributor first" : "Enter the units finished first"); return; }
   ev.target.disabled = true;
   const ordersEl = $(`#o-${CSS.escape(t.id)}`);
-  const orders = ordersEl ? (Math.max(0, Math.round(Number(ordersEl.value) || 0)) || 1) : undefined;
+  const orders = ordersEl ? (Math.max(0, Math.round(Number(ordersEl.value) || 0)) || (ordersEl.dataset.follow ? Math.max(1, Number(q) || 0) : 1)) : undefined;
   try { applyEntry((await api({ action:"stop", id:t.id, end: Date.now(), qty: q, orders }, "POST")).entry); renderAll(); toast("Saved"); }
   catch(err){ ev.target.disabled=false; toast("Couldn't stop: " + err.message); }
 });
@@ -890,6 +899,11 @@ document.addEventListener("change", ev => {
   commitRows(scope, rows);
 });
 
+document.getElementById("timers").addEventListener("input", ev => {
+  const el = ev.target;
+  if (el.id?.startsWith("o-")) { el.dataset.touched = "1"; return; }
+  if (el.id?.startsWith("q-")) { const o = document.getElementById("o-" + el.id.slice(2)); if (o && o.dataset.follow && !o.dataset.touched) o.value = el.value; }
+});
 function renderLog(){
   const day = $("#logDate").value || todayStr(), emp = $("#logEmp").value;
   const rows = finished().filter(e => e.date===day && (!emp || e.employee===emp)).sort((a,b)=>a.start-b.start);
@@ -899,7 +913,7 @@ function renderLog(){
       return `<tr><td class="mono">${fmtTime(e.start)}–${fmtTime(e.end)}${e.pausedMs ? `<br><span class="note">${fmtElapsed(e.pausedMs)} paused</span>` : ""}</td>
       <td>${e.kind==="machine" ? `<span class="pill machine">${esc(e.printer||"printer")}</span>` : esc(e.employee)}</td>
       <td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p?.name||e.productId)}</td>
-      <td>${CLEAR[e.stepId] ? `<span class="pill">Cleared</span> ${esc(CLEAR[e.stepId])}` : esc(s?.name||e.stepId)}</td><td class="n">${fmtNum(e.qty)}</td><td class="n">${e.orders != null ? fmtNum(e.orders) : `<span class="note">—</span>`}</td><td class="n">${fmtNum(h*60)}</td><td class="n">${rate?fmtNum(rate,1):"—"}</td>
+      <td>${CLEAR[e.stepId] ? `<span class="pill">Cleared</span> ${esc(CLEAR[e.stepId])}` : esc(s?.name||e.stepId)}</td><td class="n">${fmtNum(e.qty)}</td><td class="n">${ordersOf(e) != null ? fmtNum(ordersOf(e)) : `<span class="note">—</span>`}</td><td class="n">${fmtNum(h*60)}</td><td class="n">${rate?fmtNum(rate,1):"—"}</td>
       <td class="note">${esc([e.kind!=="machine" ? e.printer : null, splitText(e), CLEAR[e.stepId] ? null : e.note].filter(Boolean).join(" · "))}</td>
       <td style="white-space:nowrap">${CLEAR[e.stepId] ? "" : `<button class="link" data-edit="${esc(e.id)}">Edit</button>`}<button class="link" data-del="${esc(e.id)}" style="color:var(--bad)">Delete</button></td></tr>`; }).join("") + `</tbody>`;
   const lab = rows.filter(e=>e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0), mac = rows.filter(e=>e.kind==="machine").reduce((a,e)=>a+hoursOf(e),0);
@@ -933,16 +947,19 @@ $("#btnExport").addEventListener("click", async () => {
 const CLEAR = { _shipped: "Shipped, but not logged", _scrap: "Misprint or scrap", _error: "Entered by mistake" };
 // Orders are asked on the finishing step once the sheet script can store them (version 6).
 const isShipStep = (pid, sid) => { const p = prod(pid); return scriptVersion >= 6 && !!p && !p.overhead && !!sid && p.completeStep === sid; };
+const ordersFollowUnits = (pid, sid) => step(pid, sid)?.ordersDefault === "units";
+// Orders for an entry; on "one item per order" steps an entry logged without orders counts one order per unit.
+const ordersOf = (e) => e.orders != null ? Number(e.orders) : (ordersFollowUnits(e.productId, e.stepId) && Number(e.qty) > 0 ? Number(e.qty) : null);
 const isShipped = (e, p) => !!p && (e.stepId === p.completeStep || e.stepId === "_shipped");
 // A step whose target is set in orders per hour (Setup → "Counts"), normally Pack & ship.
 const perOrder = s => s?.per === "orders";
 // The count a step is measured in: orders for per-order steps (falling back to units for entries logged before orders existed).
-const workCount = (e, s) => perOrder(s) ? (e.orders != null ? Number(e.orders) : Number(e.qty) || 0) : (Number(e.qty) || 0);
+const workCount = (e, s) => perOrder(s) ? (ordersOf(e) ?? (Number(e.qty) || 0)) : (Number(e.qty) || 0);
 // Typical units per order for a product, from Pack & ship entries that recorded orders in the last 90 days.
 function unitsPerOrder(p){
   const since = ymd(addDays(new Date(), -89));
   let u = 0, o = 0;
-  for (const e of finished()) if (e.productId === p.id && e.stepId === p.completeStep && e.date >= since && e.orders > 0 && e.qty > 0) { u += Number(e.qty); o += Number(e.orders); }
+  for (const e of finished()) if (e.productId === p.id && e.stepId === p.completeStep && e.date >= since && ordersOf(e) > 0 && e.qty > 0) { u += Number(e.qty); o += ordersOf(e); }
   return o >= 5 ? u / o : 1;   // until there are a few orders logged, assume one unit per order
 }
 function plannedOrders(p){
@@ -1176,11 +1193,11 @@ function computeResults(date){
   const done = finished().filter(e => e.date === date);
   const prods = products().filter(p => !p.overhead && p.completeStep).map(p => {
     const shipped = done.filter(e => e.productId === p.id && isShipped(e, p));
-    const withOrders = shipped.filter(e => e.orders != null);
+    const withOrders = shipped.filter(e => ordersOf(e) != null);
     return { id: p.id, name: p.name,
       started: done.filter(e => e.productId === p.id && e.stepId === p.steps[0]?.id).reduce((a, e) => a + (Number(e.qty) || 0), 0),
       finished: shipped.reduce((a, e) => a + (Number(e.qty) || 0), 0),
-      orders: withOrders.length ? withOrders.reduce((a, e) => a + (Number(e.orders) || 0), 0) : null,
+      orders: withOrders.length ? withOrders.reduce((a, e) => a + (ordersOf(e) || 0), 0) : null,
       planned: resPlan && resPlanFor === date ? (Number(resPlan[p.id]) || null) : null };
   }).filter(x => x.finished || x.planned || x.started);
   const sum = k => list.reduce((a, t) => a + t[k], 0);
@@ -1502,7 +1519,8 @@ function renderSetup(){
       <td class="n"><input type="number" min="0" step="0.1" id="s-${pi}-${si}-e" data-p="${pi}" data-s="${si}" data-k="${p.overhead?"perDay":"est"}" value="${(p.overhead?s.perDay:s.est) ?? ""}" style="width:90px;text-align:right" placeholder="—"></td>
       ${p.overhead?"":`<td class="n"><input type="number" min="0" max="2" step="0.05" id="s-${pi}-${si}-s" data-p="${pi}" data-s="${si}" data-k="share" value="${s.share ?? 1}" style="width:80px;text-align:right"></td>
       <td><input type="radio" name="cs-${pi}" id="s-${pi}-${si}-c" data-p="${pi}" data-s="${si}" data-k="complete" ${p.completeStep===s.id?"checked":""} style="width:auto" aria-label="Count volume at ${esc(s.name)}"></td>
-      <td>${s.kind==="labor" && p.completeStep===s.id ? `<select id="s-${pi}-${si}-per" data-p="${pi}" data-s="${si}" data-k="per" style="width:auto" aria-label="What the ${esc(s.name)} target counts">${opt("units","Units",!perOrder(s))}${opt("orders","Orders",perOrder(s))}</select>` : `<span class="note">units</span>`}</td>`}
+      <td>${s.kind==="labor" && p.completeStep===s.id ? `<select id="s-${pi}-${si}-per" data-p="${pi}" data-s="${si}" data-k="per" style="width:auto" aria-label="What the ${esc(s.name)} target counts">${opt("units","Units",!perOrder(s))}${opt("orders","Orders",perOrder(s))}</select>
+        <select id="s-${pi}-${si}-od" data-p="${pi}" data-s="${si}" data-k="ordersDefault" style="width:auto;margin-top:4px" aria-label="What the Orders box starts at" title="What the Orders box starts at">${opt("one","Orders start at 1",s.ordersDefault!=="units")}${opt("units","Orders = units",s.ordersDefault==="units")}</select>` : `<span class="note">units</span>`}</td>`}
       <td style="white-space:nowrap"><button class="mv" type="button" data-move="${pi}|${si}|-1" aria-label="Move ${esc(s.name)} up" ${si===0?"disabled":""}>↑</button> <button class="mv" type="button" data-move="${pi}|${si}|1" aria-label="Move ${esc(s.name)} down" ${si===p.steps.length-1?"disabled":""}>↓</button> <button class="link" type="button" data-rm-step="${pi}|${si}" style="color:var(--bad)">Remove</button></td></tr>`).join("")}
     </tbody></table></div><div class="row" style="margin-top:8px"><button class="b small" type="button" data-add-step="${pi}">Add step</button>
     ${!p.overhead && p.steps.some(x => x.kind === "machine") && (draft.printers||[]).length ? `<div class="row" style="gap:6px 12px;align-items:center;font-size:14px"><span class="optional"><b>Printed on:</b></span>${draft.printers.map((pr, ri) => `<label class="optional" style="display:flex;gap:5px;align-items:center"><input type="checkbox" id="pp-${pi}-${ri}" data-pp="${pi}" data-printer="${esc(pr.name)}" ${(!(p.printers||[]).length || p.printers.includes(pr.name)) ? "checked" : ""} style="width:auto"> ${esc(pr.name)}</label>`).join("")}</div>` : ""}
@@ -1567,7 +1585,7 @@ $("#view-setup").addEventListener("input", ev => {
     else p[t.dataset.k] = Number(t.value);
     markDirty(); }
   else if (t.dataset.s != null) { const p=draft.products[+t.dataset.p], s=p.steps[+t.dataset.s], k=t.dataset.k;
-    if (k==="complete") p.completeStep = s.id; else if (k==="askPrinter") s.askPrinter = t.checked; else if (k==="per") s.per = t.value === "orders" ? "orders" : undefined; else if (k==="name"||k==="kind") s[k]=t.value; else s[k] = t.value===""?null:Number(t.value); markDirty(); }
+    if (k==="complete") p.completeStep = s.id; else if (k==="askPrinter") s.askPrinter = t.checked; else if (k==="per") s.per = t.value === "orders" ? "orders" : undefined; else if (k==="ordersDefault") s.ordersDefault = t.value === "units" ? "units" : undefined; else if (k==="name"||k==="kind") s[k]=t.value; else s[k] = t.value===""?null:Number(t.value); markDirty(); }
   else if (t.dataset.req != null) { draft.products[+t.dataset.req].distributorRequired = t.checked; markDirty(); }
   else if (t.dataset.pp != null) {
     const pr = draft.products[+t.dataset.pp], all = (draft.printers||[]).map(x => x.name);
