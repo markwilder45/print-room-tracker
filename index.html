@@ -894,13 +894,13 @@ function renderLog(){
   const day = $("#logDate").value || todayStr(), emp = $("#logEmp").value;
   const rows = finished().filter(e => e.date===day && (!emp || e.employee===emp)).sort((a,b)=>a.start-b.start);
   if (!rows.length) { $("#logTable").innerHTML = `<tbody><tr><td><div class="empty">Nothing finished on this day yet. Stopped timers and past-time entries show up here.</div></td></tr></tbody>`; $("#logSummary").textContent=""; return; }
-  $("#logTable").innerHTML = `<thead><tr><th>Time</th><th>Who</th><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Min</th><th class="n">Units/hr</th><th>Detail</th><th></th></tr></thead><tbody>` +
+  $("#logTable").innerHTML = `<thead><tr><th>Time</th><th>Who</th><th>Product</th><th>Step</th><th class="n">Units</th><th class="n">Orders</th><th class="n">Min</th><th class="n">Units/hr</th><th>Detail</th><th></th></tr></thead><tbody>` +
     rows.map(e => { const p=prod(e.productId), s=step(e.productId,e.stepId), h=hoursOf(e), rate = e.qty && h ? e.qty/h : null;
       return `<tr><td class="mono">${fmtTime(e.start)}–${fmtTime(e.end)}${e.pausedMs ? `<br><span class="note">${fmtElapsed(e.pausedMs)} paused</span>` : ""}</td>
       <td>${e.kind==="machine" ? `<span class="pill machine">${esc(e.printer||"printer")}</span>` : esc(e.employee)}</td>
       <td><span class="sw" style="background:${colorVar(p)}"></span>${esc(p?.name||e.productId)}</td>
-      <td>${CLEAR[e.stepId] ? `<span class="pill">Cleared</span> ${esc(CLEAR[e.stepId])}` : esc(s?.name||e.stepId)}</td><td class="n">${fmtNum(e.qty)}</td><td class="n">${fmtNum(h*60)}</td><td class="n">${rate?fmtNum(rate,1):"—"}</td>
-      <td class="note">${esc([e.kind!=="machine" ? e.printer : null, e.orders != null ? `${fmtNum(e.orders)} order${e.orders == 1 ? "" : "s"}` : null, splitText(e), CLEAR[e.stepId] ? null : e.note].filter(Boolean).join(" · "))}</td>
+      <td>${CLEAR[e.stepId] ? `<span class="pill">Cleared</span> ${esc(CLEAR[e.stepId])}` : esc(s?.name||e.stepId)}</td><td class="n">${fmtNum(e.qty)}</td><td class="n">${e.orders != null ? fmtNum(e.orders) : `<span class="note">—</span>`}</td><td class="n">${fmtNum(h*60)}</td><td class="n">${rate?fmtNum(rate,1):"—"}</td>
+      <td class="note">${esc([e.kind!=="machine" ? e.printer : null, splitText(e), CLEAR[e.stepId] ? null : e.note].filter(Boolean).join(" · "))}</td>
       <td style="white-space:nowrap">${CLEAR[e.stepId] ? "" : `<button class="link" data-edit="${esc(e.id)}">Edit</button>`}<button class="link" data-del="${esc(e.id)}" style="color:var(--bad)">Delete</button></td></tr>`; }).join("") + `</tbody>`;
   const lab = rows.filter(e=>e.kind==="labor").reduce((a,e)=>a+hoursOf(e),0), mac = rows.filter(e=>e.kind==="machine").reduce((a,e)=>a+hoursOf(e),0);
   $("#logSummary").textContent = `${rows.length} entries · ${fmtH(lab)} labor hours · ${fmtH(mac)} printer hours`;
