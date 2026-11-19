@@ -11,10 +11,10 @@
  */
 
 const PASSCODE = 'CHANGE-ME';   // change here to rotate; redeploy after changing
-const SCRIPT_VERSION = 5;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans
+const SCRIPT_VERSION = 6;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans, 6 = orders at ship, carry-over, output vs target
 const MAX_RECIPIENTS = 25;          // per report
 const MAX_REPORTS_PER_DAY = 20;     // guards the Gmail sending quota
-const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt'];
+const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt','orders'];
 const SEED_CONFIG = {"version": 1, "employees": [], "distributors": ["Grove", "Amazon FBA", "Direct / Retail"], "printers": [{"name": "Printer 1", "hoursPerDay": 8}], "productiveHoursPerPerson": 6.5, "workdaysPerWeek": 5, "products": [{"id": "poster", "name": "Posters", "color": 0, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 45, "share": 1}, {"id": "roll", "name": "Rolling", "kind": "labor", "est": 30, "share": 1}, {"id": "tube", "name": "Tubing", "kind": "labor", "est": 40, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "vinyl", "name": "Vinyl / Decals", "color": 1, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 45, "share": 1}, {"id": "weed", "name": "Weeding (peel excess)", "kind": "labor", "est": 20, "share": 1}, {"id": "roll", "name": "Rolling", "kind": "labor", "est": 30, "share": 1}, {"id": "tube", "name": "Tubing", "kind": "labor", "est": 40, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "canvas", "name": "Canvas", "color": 2, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 45, "share": 1}, {"id": "frames", "name": "Cut / build frames", "kind": "labor", "est": 10, "share": 1}, {"id": "stretch", "name": "Stretch canvas", "kind": "labor", "est": 20, "share": 1}, {"id": "foam", "name": "Foam canvases", "kind": "labor", "est": 90, "share": 1}, {"id": "boxes", "name": "Build boxes", "kind": "labor", "est": 6, "share": 1}, {"id": "pack", "name": "Package canvas (box already built)", "kind": "labor", "est": 50, "share": 1}, {"id": "ship", "name": "Ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "wrap_single", "name": "Wrapping Paper \u2013 Singles", "color": 3, "completeStep": "ship", "askDistributor": true, "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 42, "share": 1}, {"id": "rolltube", "name": "Roll & tube", "kind": "labor", "est": 24, "share": 1}, {"id": "sticker", "name": "Sticker", "kind": "labor", "est": null, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "wrap_bulk", "name": "Wrapping Paper \u2013 Bulk", "color": 4, "completeStep": "ship", "askDistributor": true, "defaultDistributor": "Grove", "steps": [{"id": "prep", "name": "Image file prep & queue", "kind": "labor", "est": 30, "share": 1}, {"id": "label", "name": "Print invoice / label", "kind": "labor", "est": 30, "share": 1}, {"id": "print", "name": "Print run", "kind": "machine", "est": null, "share": 1}, {"id": "trim", "name": "Cut & trim", "kind": "labor", "est": 42, "share": 1}, {"id": "rolltube", "name": "Roll & tube", "kind": "labor", "est": 24, "share": 1}, {"id": "sticker", "name": "Sticker", "kind": "labor", "est": null, "share": 1}, {"id": "ship", "name": "Pack & ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "ribbon", "name": "Ribbons", "color": 5, "completeStep": "package", "askDistributor": true, "defaultDistributor": "Grove", "steps": [{"id": "upc", "name": "UPC sticker", "kind": "labor", "est": null, "share": 1}, {"id": "package", "name": "Package", "kind": "labor", "est": null, "share": 1}]}, {"id": "photo", "name": "Photos (ScanCafe prints)", "color": 6, "completeStep": "ship", "askDistributor": false, "steps": [{"id": "pack", "name": "Pack", "kind": "labor", "est": null, "share": 1}, {"id": "ship", "name": "Ship", "kind": "labor", "est": null, "share": 1}]}, {"id": "general", "name": "General / overhead", "color": 7, "overhead": true, "completeStep": null, "askDistributor": false, "steps": [{"id": "maint", "name": "Machine maintenance", "kind": "labor", "perDay": 0.5}, {"id": "clean", "name": "Work space clean up", "kind": "labor", "perDay": 0.3}]}]};
 
 function doGet(e) { return handle_(e.parameter || {}); }
@@ -31,7 +31,7 @@ function handle_(req) {
       case 'load':       return json_(load_(req.since));
       case 'changes':    return json_(changes_(Number(req.after) || 0));
       case 'upsert':     return json_(withLock_(() => upsert_(req.entry)));
-      case 'stop':       return json_(withLock_(() => stop_(req.id, Number(req.end), req.qty)));
+      case 'stop':       return json_(withLock_(() => stop_(req.id, Number(req.end), req.qty, req.orders)));
       case 'delete':     return json_(withLock_(() => patch_(req.id, { deleted: true })));
       case 'pause':      return json_(withLock_(() => pause_(req.id, Number(req.at))));
       case 'resume':     return json_(withLock_(() => resume_(req.id, Number(req.at))));
@@ -95,6 +95,7 @@ function rowToEntry_(r) {
   e.date = typeof e.date === 'object' && e.date ? Utilities.formatDate(e.date, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(e.date);
   ['start','end','createdAt','updatedAt','pausedAt'].forEach(k => { e[k] = e[k] === '' || e[k] == null ? null : Number(e[k]); });
   e.pausedMs = Number(e.pausedMs) || 0;
+  e.orders = e.orders === '' || e.orders == null ? null : Number(e.orders);
   e.qty = e.qty === '' ? null : Number(e.qty);
   e.deleted = e.deleted === true || e.deleted === 'TRUE';
   ['employee','distributor','printer','note'].forEach(k => { if (e[k] === '') e[k] = null; });
@@ -156,10 +157,11 @@ function patch_(id, fields) {
   return { ok: true, entry: e };
 }
 
-function stop_(id, end, qty) {
+function stop_(id, end, qty, orders) {
   const row = findRow_(id); if (!row) throw new Error('That entry no longer exists');
   const e = rowToEntry_(entriesSheet_().getRange(row, 1, 1, ENTRY_COLS.length).getValues()[0]);
   const fields = { end: end, qty: qty === '' || qty == null ? '' : Number(qty) };
+  if (orders !== undefined && orders !== '' && orders != null) fields.orders = Math.max(0, Math.round(Number(orders) || 0));
   if (e.pausedAt) { fields.pausedMs = e.pausedMs + Math.max(0, end - e.pausedAt); fields.pausedAt = null; }  // stopped while paused
   return patch_(id, fields);
 }
@@ -216,7 +218,7 @@ function emailReport_(r) {
 
   const pct_ = v => v == null ? '—' : Math.round(v * 100) + '%';
   const subject = (res && res.productivity != null
-      ? 'Print room, ' + label + ': yesterday ' + pct_(res.productivity) + ' productivity (goal ' + res.goal + '%) · today ' + hrs_(labor) + ' labor hours'
+      ? 'Print room, ' + label + ': yesterday ' + pct_(res.productivity) + ' of target (goal ' + res.goal + '%) · today ' + hrs_(labor) + ' labor hours'
       : 'Print room forecast, ' + label + ': ' + hrs_(labor) + ' labor hours')
     + (behind ? ' · oldest order ' + behind.days + (behind.days === 1 ? ' day' : ' days') : '');
   const daysTxt = d => d == null ? '' : d === 0 ? 'today' : d + (d === 1 ? ' day' : ' days');
@@ -240,27 +242,32 @@ function emailReport_(r) {
     html += h2('Yesterday · ' + esc_(res.label));
     const ok = res.productivity != null && res.productivity * 100 >= res.goal;
     html += '<table role="presentation" cellspacing="0" cellpadding="0" style="margin:10px 0;border-collapse:collapse"><tr>' +
-      tile(res.productivity == null ? '—' : '<span style="color:' + (ok ? good : bad) + '">' + pct_(res.productivity) + '</span>', 'Productivity', 'goal ' + res.goal + '%' + (res.productivity == null ? ' · no hours worked entered' : ok ? ' · met' : ' · below goal')) +
-      tile(hrs_(res.earned), 'Earned hours', 'work completed, at standard times') +
-      tile(res.worked ? hrs_(res.worked) : '—', 'Hours worked', res.worked ? hrs_(res.logged) + ' logged on timers' : '') + '</tr></table>';
-    if (res.worked && res.worked - res.logged >= 0.25) html += '<p style="font:13px Arial,sans-serif;color:' + muted + ';margin:4px 0">' + hrs_(res.worked - res.logged) + ' of the hours worked weren\'t logged on any task.</p>';
+      tile(res.productivity == null ? '—' : '<span style="color:' + (ok ? good : bad) + '">' + pct_(res.productivity) + '</span>', 'Output vs target', 'goal ' + res.goal + '%' + (res.productivity == null ? ' · no hours worked entered' : ok ? ' · met' : ' · below goal')) +
+      tile(res.worked ? hrs_(res.worked) : '—', 'Hours worked', 'from the timeclock') +
+      tile(hrs_(res.logged), 'Logged on tasks', res.worked && res.worked - res.logged >= 0.25 ? hrs_(res.worked - res.logged) + ' not on any task' : '') + '</tr></table>';
+    if (res.productivity != null) html += '<p style="font:14px Arial,sans-serif;margin:4px 0">The work finished would take <b>' + hrs_(res.earned) + ' hours</b> at target pace, done in <b>' + hrs_(res.worked) + ' hours worked</b>.</p>';
     if (res.techs.length) {
-      html += h3('By tech') + tbl + th('Tech') + thn('Worked') + thn('Logged') + thn('Earned') + thn('Productivity') + '</tr>';
-      res.techs.forEach(t => { html += '<tr>' + td(esc_(t.name)) + tdn(t.worked ? hrs_(t.worked) : '—') + tdn(hrs_(t.logged)) + tdn(hrs_(t.earned)) + tdn(pctCell(t.worked ? t.earned / t.worked : null)) + '</tr>'; });
+      html += h3('By tech') + tbl + th('Tech') + thn('Worked') + thn('Logged') + thn('Output vs target') + '</tr>';
+      res.techs.forEach(t => { html += '<tr>' + td(esc_(t.name)) + tdn(t.worked ? hrs_(t.worked) : '—') + tdn(hrs_(t.logged)) + tdn(pctCell(t.worked ? t.earned / t.worked : null)) + '</tr>'; });
       html += '</table>';
     }
     if (res.products.length) {
-      const anyPlan = res.products.some(p => p.planned != null);
-      html += h3('Finished') + tbl + th('Product') + (anyPlan ? thn('Planned') : '') + thn('Finished') + '</tr>';
-      res.products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + (anyPlan ? tdn(p.planned == null ? '—' : num_(p.planned)) : '') + tdn('<b>' + num_(p.finished) + '</b>') + '</tr>'; });
+      const anyPlan = res.products.some(p => p.planned != null), anyOrders = res.products.some(p => p.orders != null);
+      html += h3('Shipped') + tbl + th('Product') + (anyPlan ? thn('Planned') : '') + thn('Units') + (anyOrders ? thn('Orders') : '') + '</tr>';
+      res.products.forEach(p => { html += '<tr>' + td(esc_(p.name)) + (anyPlan ? tdn(p.planned == null ? '—' : num_(p.planned)) : '') + tdn('<b>' + num_(p.finished) + '</b>') + (anyOrders ? tdn(p.orders == null ? '—' : num_(p.orders)) : '') + '</tr>'; });
+      html += '</table>';
+    }
+    if (res.carry.length) {
+      html += h3('Carried over') + tbl + th('Product') + thn('Open units') + th('Why') + '</tr>';
+      res.carry.forEach(c => { html += '<tr>' + td(esc_(c.name)) + tdn('<b>' + num_(c.open) + '</b>') + td(c.note ? esc_(c.note) : '<span style="color:' + muted + '">—</span>') + '</tr>'; });
       html += '</table>';
     }
     if (res.steps.length) {
-      html += h3('Where the time went') + tbl + th('Product') + th('Step') + thn('Units') + thn('Earned hrs') + '</tr>';
-      res.steps.forEach(x => { html += '<tr>' + td(esc_(x.product)) + td(esc_(x.step)) + tdn(x.units == null ? '—' : num_(x.units)) + tdn(hrs_(x.earned)) + '</tr>'; });
-      html += '</table>';
+      html += h3('Units done vs expected') + tbl + th('Product') + th('Step') + thn('Done') + thn('Expected') + thn('Pace') + '</tr>';
+      res.steps.forEach(x => { html += '<tr>' + td(esc_(x.product)) + td(esc_(x.step)) + tdn(x.units == null ? '—' : num_(x.units)) + tdn(x.expected == null ? '—' : num_(x.expected, 1)) + tdn(x.expected ? pctCell(x.units / x.expected) : '—') + '</tr>'; });
+      html += '</table><p style="font:12px Arial,sans-serif;color:' + muted + ';margin:6px 0">Expected is what the target rate would produce in the time logged on that step. Maintenance and clean-up count at the time logged.</p>';
     }
-    if (res.unrated.length) html += '<p style="font:13px Arial,sans-serif;color:' + muted + ';margin:8px 0">No standard time yet, so not counted in earned hours: ' + res.unrated.map(u => esc_(u.product) + ' · ' + esc_(u.step) + (u.units ? ' (' + num_(u.units) + ')' : '')).join(', ') + '.</p>';
+    if (res.unrated.length) html += '<p style="font:13px Arial,sans-serif;color:' + muted + ';margin:8px 0">No target yet, so not counted: ' + res.unrated.map(u => esc_(u.product) + ' · ' + esc_(u.step) + (u.units ? ' (' + num_(u.units) + ')' : '')).join(', ') + '.</p>';
     html += h2("Today's forecast · " + esc_(label));
   }
   html += '<table role="presentation" cellspacing="0" cellpadding="0" style="margin:14px 0;border-collapse:collapse"><tr>' +
@@ -286,9 +293,10 @@ function emailReport_(r) {
   let text = 'Print room forecast, ' + label + (sentBy ? ' (sent by ' + sentBy + ')' : '') + '\n\n';
   if (note) text += note + '\n\n';
   if (res) {
-    text += 'YESTERDAY · ' + res.label + '\nProductivity: ' + pct_(res.productivity) + ' (goal ' + res.goal + '%)\nEarned hours: ' + hrs_(res.earned) + '\nHours worked: ' + (res.worked ? hrs_(res.worked) : '—') + ' (' + hrs_(res.logged) + ' logged)\n';
-    if (res.techs.length) text += res.techs.map(t => '  ' + t.name + ': worked ' + (t.worked ? hrs_(t.worked) : '—') + ', earned ' + hrs_(t.earned) + ', ' + pct_(t.worked ? t.earned / t.worked : null)).join('\n') + '\n';
-    if (res.products.length) text += 'Finished\n' + res.products.map(p => '  ' + p.name + ': ' + num_(p.finished) + (p.planned != null ? ' of ' + num_(p.planned) + ' planned' : '')).join('\n') + '\n';
+    text += 'YESTERDAY · ' + res.label + '\nOutput vs target: ' + pct_(res.productivity) + ' (goal ' + res.goal + '%)\nHours worked: ' + (res.worked ? hrs_(res.worked) : '—') + ' (' + hrs_(res.logged) + ' logged on tasks)\n';
+    if (res.techs.length) text += res.techs.map(t => '  ' + t.name + ': worked ' + (t.worked ? hrs_(t.worked) : '—') + ', ' + pct_(t.worked ? t.earned / t.worked : null) + ' of target').join('\n') + '\n';
+    if (res.products.length) text += 'Shipped\n' + res.products.map(p => '  ' + p.name + ': ' + num_(p.finished) + ' units' + (p.orders != null ? ' in ' + num_(p.orders) + (p.orders === 1 ? ' order' : ' orders') : '') + (p.planned != null ? ' (' + num_(p.planned) + ' planned)' : '')).join('\n') + '\n';
+    if (res.carry.length) text += 'Carried over\n' + res.carry.map(c => '  ' + c.name + ': ' + num_(c.open) + ' open' + (c.note ? ' · ' + c.note : '')).join('\n') + '\n';
     text += '\nTODAY · ' + label + '\n';
   }
   text += 'Labor hours: ' + hrs_(labor) + ' (incl. overhead)\nPeople needed: ' + num_(people, 1) + '\nPrinter hours: ' + (printer ? hrs_(printer) : '—') + (cap ? ' of ' + hrs_(cap) + ' available' : '') + '\n\n';
@@ -308,7 +316,7 @@ function emailReport_(r) {
   const plan = {};
   if (r.plan && typeof r.plan === 'object') Object.keys(r.plan).slice(0, 40).forEach(k => { const n = Number(r.plan[k]); if (k.length <= 40 && isFinite(n) && n > 0) plan[k] = n; });
   log.appendRow([new Date(), label, period, Math.round(labor * 10) / 10, Math.round(people * 10) / 10, Math.round(printer * 10) / 10, sentBy, list.join(', '),
-    reportDate, JSON.stringify(plan), res ? JSON.stringify({ date: res.label, productivity: res.productivity, earned: res.earned, worked: res.worked, logged: res.logged, techs: res.techs }) : '']);
+    reportDate, JSON.stringify(plan), res ? JSON.stringify({ date: res.label, productivity: res.productivity, earned: res.earned, worked: res.worked, logged: res.logged, techs: res.techs, shipped: res.products, carry: res.carry }) : '']);
   return { ok: true, sentTo: list.length };
 }
 
@@ -319,11 +327,13 @@ function parseResults_(x) {
   const n = v => { const k = Number(v); return isFinite(k) && k >= 0 ? k : 0; };
   const goal = Math.min(200, Math.max(1, Number(x.goal) || 95));
   const techs = (Array.isArray(x.techs) ? x.techs : []).slice(0, 30).map(t => ({ name: str_(t.name, 60), worked: n(t.worked), earned: n(t.earned), logged: n(t.logged) })).filter(t => t.name && (t.worked || t.earned || t.logged));
-  const products = (Array.isArray(x.products) ? x.products : []).slice(0, 30).map(p => ({ name: str_(p.name, 60), finished: n(p.finished), planned: p.planned == null || p.planned === '' ? null : n(p.planned) })).filter(p => p.name && (p.finished || p.planned));
-  const steps = (Array.isArray(x.steps) ? x.steps : []).slice(0, 12).map(s => ({ product: str_(s.product, 60), step: str_(s.step, 80), units: s.units == null ? null : n(s.units), earned: n(s.earned) })).filter(s => s.earned > 0);
+  const opt = v => v == null || v === '' ? null : n(v);
+  const products = (Array.isArray(x.products) ? x.products : []).slice(0, 30).map(p => ({ name: str_(p.name, 60), finished: n(p.finished), planned: opt(p.planned), orders: opt(p.orders) })).filter(p => p.name && (p.finished || p.planned));
+  const steps = (Array.isArray(x.steps) ? x.steps : []).slice(0, 12).map(s => ({ product: str_(s.product, 60), step: str_(s.step, 80), units: s.units == null ? null : n(s.units), expected: opt(s.expected), earned: n(s.earned) })).filter(s => s.earned > 0);
+  const carry = (Array.isArray(x.carry) ? x.carry : []).slice(0, 30).map(c => ({ name: str_(c.name, 60), open: n(c.open), note: str_(c.note, 200) })).filter(c => c.name && c.open > 0);
   const unrated = (Array.isArray(x.unrated) ? x.unrated : []).slice(0, 12).map(s => ({ product: str_(s.product, 60), step: str_(s.step, 80), units: n(s.units) }));
   const worked = n(x.worked), earned = n(x.earned), logged = n(x.logged);
-  return { label: str_(x.label, 60), goal: goal, worked: worked, earned: earned, logged: logged, productivity: worked > 0 ? earned / worked : null, techs: techs, products: products, steps: steps, unrated: unrated };
+  return { label: str_(x.label, 60), goal: goal, worked: worked, earned: earned, logged: logged, productivity: worked > 0 ? earned / worked : null, techs: techs, products: products, steps: steps, unrated: unrated, carry: carry };
 }
 
 // The planned units from the last day report sent for a given date, so the next day's report can compare plan to actual.

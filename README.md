@@ -53,6 +53,18 @@ timeclock; everything else comes from the floor log for that date.
 - **Planned vs finished:** each day report stores its planned units on the `Reports` tab (`reportDate`, `plan`),
   and the next day's results compare finished units against them. Needs script version 5.
 
+## Orders and carry-over
+
+- **Orders:** the finishing step (Pack & ship, or Package) asks for units and orders side by side; orders starts at 1.
+  Stored in the `orders` column (script version 6).
+- **Carry-over:** for each product, units started at the first step minus units shipped, carried day to day from the
+  "Count carry-over from" date on Setup. The morning report lists products with open units and needs a short note for
+  each before it sends. Units that aren't really pending can be cleared with a reason: "Shipped, but not logged" counts
+  them as shipped; "Misprint or scrap" and "Entered by mistake" just remove them. Clears are rows on `Entries` with
+  stepId `_shipped`, `_scrap` or `_error` and kind `adjust`; deleting one from the Day log undoes it.
+- **Output vs target:** the work finished at target pace divided by hours worked, with units done vs expected per step.
+- The forecast now uses the planned units at every step (the old learned step ratios are off).
+
 ## Raw data
 
 The `Entries` tab has one row per task: date, start, end (epoch ms plus readable times), minutes, employee,
