@@ -1268,9 +1268,7 @@ function renderResults(){
   const label = parseYmd(date).toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" });
   $("#resKpis").innerHTML = [
     [prodty == null ? "—" : pctText(prodty), "Output vs target", prodty == null ? `Goal ${g}% · enter hours worked` : `Goal ${g}% · ${prodty * 100 >= g ? "met" : "below goal"}`, prodty == null ? "" : prodty * 100 >= g ? "var(--good)" : "var(--bad)"],
-    [R.worked ? fmtNum(R.worked, 2) : "—", "Hours worked", "From the timeclock", ""],
-    [fmtNum(R.logged, 2), "Logged on tasks", "Time with a task timer running", ""],
-    [R.worked ? fmtNum(Math.max(0, R.worked - R.logged), 2) : "—", "Not logged", "Worked but not on any task", ""]
+    [R.worked ? fmtNum(R.worked, 2) : "—", "Hours worked", "From the timeclock", ""]
   ].map(([v,l,sub,c]) => `<div class="kpi"${c ? ` style="border-left-color:${c}"` : ""}><span class="l">${l}</span><span class="v"${c ? ` style="color:${c}"` : ""}>${v}</span><span class="s">${esc(sub)}</span></div>`).join("");
   $("#resSummary").innerHTML = prodty == null ? "" : `The work finished would take <b>${fmtNum(R.earned, 2)} hours</b> at target pace, done in <b>${fmtNum(R.worked, 2)} hours worked</b>.`;
   // tech table: keep the inputs while someone is typing in them
@@ -1278,13 +1276,13 @@ function renderResults(){
   if (!typing || $("#resTechs").dataset.date !== date || $("#resTechs").dataset.names !== R.techs.map(t => t.name).join("|")) {
     $("#resTechs").dataset.date = date; $("#resTechs").dataset.names = R.techs.map(t => t.name).join("|");
     $("#resTechs").innerHTML = !R.techs.length ? `<tbody><tr><td><div class="empty">Add employees in Setup to enter hours worked.</div></td></tr></tbody>` :
-      `<thead><tr><th>Tech</th><th class="n">Worked</th><th class="n">Logged</th><th class="n">Output vs target</th></tr></thead><tbody>` +
-      R.techs.map((t, i) => `<tr><td>${esc(t.name)}</td><td class="n"><input type="number" min="0" max="24" step="0.25" inputmode="decimal" id="rw-${i}" data-worked="${esc(t.name)}" value="${t.worked || ""}" placeholder="0" style="width:84px;text-align:right" aria-label="Hours worked by ${esc(t.name)}"></td><td class="n" id="rl-${i}"></td><td class="n" id="rp-${i}"></td></tr>`).join("") +
-      `<tr class="total"><td>Department</td><td class="n" id="rw-total"></td><td class="n" id="rl-total"></td><td class="n" id="rp-total"></td></tr></tbody>`;
+      `<thead><tr><th>Tech</th><th class="n">Worked</th><th class="n">Output vs target</th></tr></thead><tbody>` +
+      R.techs.map((t, i) => `<tr><td>${esc(t.name)}</td><td class="n"><input type="number" min="0" max="24" step="0.25" inputmode="decimal" id="rw-${i}" data-worked="${esc(t.name)}" value="${t.worked || ""}" placeholder="0" style="width:84px;text-align:right" aria-label="Hours worked by ${esc(t.name)}"></td><td class="n" id="rp-${i}"></td></tr>`).join("") +
+      `<tr class="total"><td>Department</td><td class="n" id="rw-total"></td><td class="n" id="rp-total"></td></tr></tbody>`;
   }
   R.techs.forEach((t, i) => { const set = (id, h) => { const el = document.getElementById(id); if (el) el.innerHTML = h; };
-    set(`rl-${i}`, fmtNum(t.logged, 2)); set(`rp-${i}`, pctPill(t.worked ? t.earned / t.worked : null)); });
-  if ($("#rw-total")) { $("#rw-total").textContent = fmtNum(R.worked, 2); $("#rl-total").textContent = fmtNum(R.logged, 2); $("#rp-total").innerHTML = pctPill(prodty); }
+    set(`rp-${i}`, pctPill(t.worked ? t.earned / t.worked : null)); });
+  if ($("#rw-total")) { $("#rw-total").textContent = fmtNum(R.worked, 2); $("#rp-total").innerHTML = pctPill(prodty); }
   const anyPlan = R.products.some(x => x.planned != null), anyOrders = R.products.some(x => x.orders != null);
   $("#resProducts").innerHTML = !R.products.length ? `<tbody><tr><td><div class="empty">Nothing started or shipped on ${esc(label)}.</div></td></tr></tbody>` :
     `<thead><tr><th>Product</th>${anyPlan ? `<th class="n">Planned</th>` : ""}<th class="n">Started</th><th class="n">Shipped</th>${anyOrders ? `<th class="n">Orders</th>` : ""}</tr></thead><tbody>` +

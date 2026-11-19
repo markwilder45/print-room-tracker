@@ -11,7 +11,7 @@
  */
 
 const PASSCODE = 'CHANGE-ME';   // change here to rotate; redeploy after changing
-const SCRIPT_VERSION = 8;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans, 6 = orders at ship, carry-over, output vs target, 7 = printer load per printer group, 8 = started units + where carried-over work is waiting
+const SCRIPT_VERSION = 9;           // 2 = pause / resume, 3 = emailed forecast reports, 4 = oldest order dates, 5 = yesterday's results + saved plans, 6 = orders at ship, carry-over, output vs target, 7 = printer load per printer group, 8 = started units + where carried-over work is waiting, 9 = no logged / not-logged hours in the report
 const MAX_RECIPIENTS = 25;          // per report
 const MAX_REPORTS_PER_DAY = 20;     // guards the Gmail sending quota
 const ENTRY_COLS = ['id','date','start','end','employee','productId','stepId','kind','qty','distributor','printer','note','createdAt','updatedAt','deleted','startLocal','endLocal','minutes','pausedMs','pausedAt','orders'];
@@ -244,12 +244,11 @@ function emailReport_(r) {
     const ok = res.productivity != null && res.productivity * 100 >= res.goal;
     html += '<table role="presentation" cellspacing="0" cellpadding="0" style="margin:10px 0;border-collapse:collapse"><tr>' +
       tile(res.productivity == null ? '—' : '<span style="color:' + (ok ? good : bad) + '">' + pct_(res.productivity) + '</span>', 'Output vs target', 'goal ' + res.goal + '%' + (res.productivity == null ? ' · no hours worked entered' : ok ? ' · met' : ' · below goal')) +
-      tile(res.worked ? hrs_(res.worked) : '—', 'Hours worked', 'from the timeclock') +
-      tile(hrs_(res.logged), 'Logged on tasks', res.worked && res.worked - res.logged >= 0.25 ? hrs_(res.worked - res.logged) + ' not on any task' : '') + '</tr></table>';
+      tile(res.worked ? hrs_(res.worked) : '—', 'Hours worked', 'from the timeclock') + '</tr></table>';
     if (res.productivity != null) html += '<p style="font:14px Arial,sans-serif;margin:4px 0">The work finished would take <b>' + hrs_(res.earned) + ' hours</b> at target pace, done in <b>' + hrs_(res.worked) + ' hours worked</b>.</p>';
     if (res.techs.length) {
-      html += h3('By tech') + tbl + th('Tech') + thn('Worked') + thn('Logged') + thn('Output vs target') + '</tr>';
-      res.techs.forEach(t => { html += '<tr>' + td(esc_(t.name)) + tdn(t.worked ? hrs_(t.worked) : '—') + tdn(hrs_(t.logged)) + tdn(pctCell(t.worked ? t.earned / t.worked : null)) + '</tr>'; });
+      html += h3('By tech') + tbl + th('Tech') + thn('Worked') + thn('Output vs target') + '</tr>';
+      res.techs.forEach(t => { html += '<tr>' + td(esc_(t.name)) + tdn(t.worked ? hrs_(t.worked) : '—') + tdn(pctCell(t.worked ? t.earned / t.worked : null)) + '</tr>'; });
       html += '</table>';
     }
     if (res.products.length) {
@@ -301,7 +300,7 @@ function emailReport_(r) {
   let text = 'Print room forecast, ' + label + (sentBy ? ' (sent by ' + sentBy + ')' : '') + '\n\n';
   if (note) text += note + '\n\n';
   if (res) {
-    text += 'YESTERDAY · ' + res.label + '\nOutput vs target: ' + pct_(res.productivity) + ' (goal ' + res.goal + '%)\nHours worked: ' + (res.worked ? hrs_(res.worked) : '—') + ' (' + hrs_(res.logged) + ' logged on tasks)\n';
+    text += 'YESTERDAY · ' + res.label + '\nOutput vs target: ' + pct_(res.productivity) + ' (goal ' + res.goal + '%)\nHours worked: ' + (res.worked ? hrs_(res.worked) : '—') + '\n';
     if (res.techs.length) text += res.techs.map(t => '  ' + t.name + ': worked ' + (t.worked ? hrs_(t.worked) : '—') + ', ' + pct_(t.worked ? t.earned / t.worked : null) + ' of target').join('\n') + '\n';
     if (res.products.length) text += 'Shipped\n' + res.products.map(p => '  ' + p.name + ': ' + num_(p.finished) + ' units' + (p.orders != null ? ' in ' + num_(p.orders) + (p.orders === 1 ? ' order' : ' orders') : '') + (p.started != null ? ', ' + num_(p.started) + ' started' : '') + (p.planned != null ? ' (' + num_(p.planned) + ' planned)' : '')).join('\n') + '\n';
     if (res.carry.length) text += 'Carried over\n' + res.carry.map(c => '  ' + c.name + ': ' + num_(c.open) + ' open' + (c.waiting ? ', waiting at ' + c.waiting : '') + (c.note ? ' · ' + c.note : '')).join('\n') + '\n';
